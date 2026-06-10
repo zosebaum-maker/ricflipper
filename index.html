@@ -371,7 +371,7 @@ let scanTimer=null, cdTimer=null, cdSecs=0;
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded',()=>{
   loadAll();
-  if(cfg.appId&&cfg.certId&&cfg.workerUrl){ startScanning(); } else { openSettings(); }
+  if(cfg.appId&&cfg.certId&&cfg.workerUrl){ startScanning(); }
   else { openSettings(); }
 });
 
