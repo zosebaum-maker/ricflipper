@@ -513,7 +513,7 @@ async function getAvgFromSold(appId, title, grade){
     .filter(p=>p>50)
     .slice(0,cfg.salesCount);
 
-  if(prices.length<2) return null;
+  if(prices.length<1) return null;
 
   const avg=prices.reduce((a,b)=>a+b,0)/prices.length;
   const result={avg, count:prices.length, prices};
@@ -535,15 +535,33 @@ async function runScan(){
     const token=await getToken();
     const gradeF=document.getElementById('f-grade')?.value||'all';
     const minVal=document.getElementById('f-minval')?.value||250;
-    let q='pokemon card graded -proxy -fake -reprint -replica -custom -lot -sealed -box';
-    if(gradeF!=='all') q=`pokemon card ${gradeF} -proxy -fake -reprint`;
+    const endTime=new Date(Date.now()+cfg.auctionWindow*3600000).toISOString();
 
     setProg(15,'Searching active listings...');
-    const endTime=new Date(Date.now()+cfg.auctionWindow*3600000).toISOString();
-    const [auctionItems, binItems]=await Promise.all([
-      ebayActiveSearch(token, q, `buyingOptions:{AUCTION},endDate:[..${endTime}]`, 'endingSoonest', 50),
-      ebayActiveSearch(token, q, 'buyingOptions:{FIXED_PRICE}', 'price', 50)
+
+    // Run parallel searches for each grade to maximise results
+    const gradeQueries=gradeF!=='all'
+      ?[gradeF]
+      :['PSA 10','PSA 9','BGS 10','BGS 9.5','CGC 10','SGC 10'];
+
+    const searchPromises=gradeQueries.flatMap(g=>[
+      ebayActiveSearch(token, `pokemon ${g} -proxy -fake -reprint -replica -lot -sealed`, `buyingOptions:{AUCTION},endDate:[..${endTime}]`, 'endingSoonest', 100),
+      ebayActiveSearch(token, `pokemon ${g} -proxy -fake -reprint -replica -lot -sealed`, 'buyingOptions:{FIXED_PRICE}', 'price', 100)
     ]);
+
+    const searchResults=await Promise.all(searchPromises);
+
+    // Deduplicate by itemId
+    const seen=new Set();
+    const auctionItems=[], binItems=[];
+    searchResults.forEach((items,i)=>{
+      items.forEach(item=>{
+        if(seen.has(item.itemId)) return;
+        seen.add(item.itemId);
+        if(i%2===0) auctionItems.push(item);
+        else binItems.push(item);
+      });
+    });
 
     setProg(30,`Found ${auctionItems.length} auctions + ${binItems.length} BIN — calculating averages...`);
 
@@ -577,7 +595,7 @@ async function runScan(){
         const projectedProfit=currentPrice<=maxBid?(netAfterCosts-currentPrice):null;
         const isBelowMaxBid=currentPrice<=maxBid;
 
-        if(discPct>0){
+        if(true){
           const isHot=discPct>=cfg.threshold&&isBelowMaxBid;
           newDeals.push({
             id: item.itemId||Math.random().toString(),
