@@ -363,7 +363,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let cfg={appId:'',certId:'',workerUrl:'',interval:5,window:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
+let cfg={appId:'',certId:'',workerUrl:'',interval:5,auctionWindow:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
 let deals=[], watchlist=new Set();
 let currentTab='all', typeFilter='all';
 let scanTimer=null, cdTimer=null, cdSecs=0;
@@ -391,7 +391,7 @@ function openSettings(){
   document.getElementById('s-worker-url').value=cfg.workerUrl||'';
 
   document.getElementById('s-interval').value=cfg.interval;
-  document.getElementById('s-window').value=cfg.window;
+  document.getElementById('s-window').value=cfg.auctionWindow;
   document.getElementById('s-threshold').value=cfg.threshold;
   document.getElementById('s-sales').value=cfg.salesCount;
   document.getElementById('s-ebayfee').value=cfg.ebayFee;
@@ -407,7 +407,7 @@ function saveSettings(){
   cfg.workerUrl=document.getElementById('s-worker-url').value.trim().replace(/\/$/,'');
 
   cfg.interval=parseInt(document.getElementById('s-interval').value)||5;
-  cfg.window=parseInt(document.getElementById('s-window').value)||4;
+  cfg.auctionWindow=parseInt(document.getElementById('s-window').value)||4;
   cfg.threshold=parseInt(document.getElementById('s-threshold').value)||15;
   cfg.salesCount=parseInt(document.getElementById('s-sales').value)||5;
   cfg.ebayFee=parseFloat(document.getElementById('s-ebayfee').value)||13;
@@ -539,7 +539,7 @@ async function runScan(){
     if(gradeF!=='all') q=`pokemon card ${gradeF} -proxy -fake -reprint`;
 
     setProg(15,'Searching active listings...');
-    const endTime=new Date(Date.now()+cfg.window*3600000).toISOString();
+    const endTime=new Date(Date.now()+cfg.auctionWindow*3600000).toISOString();
     const [auctionItems, binItems]=await Promise.all([
       ebayActiveSearch(token, q, `buyingOptions:{AUCTION},endDate:[..${endTime}]`, 'endingSoonest', 50),
       ebayActiveSearch(token, q, 'buyingOptions:{FIXED_PRICE}', 'price', 50)
