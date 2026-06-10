@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ric Flipper">
+<meta name="theme-color" content="#080a0e">
+<title>Ric Flipper</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#080a0e;--surface:#0f1218;--surface2:#161b24;--surface3:#1e2530;
+  --border:#232b38;--border2:#2d3847;--text:#e2e8f4;--text2:#6b7a94;--text3:#3d4a5e;
+  --red:#ff4757;--red-bg:rgba(255,71,87,0.08);--red-border:rgba(255,71,87,0.2);
+  --green:#00d68f;--green-bg:rgba(0,214,143,0.08);--green-border:rgba(0,214,143,0.2);
+  --amber:#ffb830;--amber-bg:rgba(255,184,48,0.08);--blue:#4d9fff;--purple:#a78bfa;
+  --radius:12px;--radius-sm:7px;
+  --mono:'Space Mono',monospace;--sans:'Syne',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.4;}
+.app{max-width:1200px;margin:0 auto;padding:1.5rem;position:relative;z-index:1;}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border);}
+.header-left{display:flex;align-items:center;gap:14px;}
+.header-title{font-size:20px;font-weight:800;letter-spacing:-0.5px;}
+.header-title span{color:var(--amber);}
+.header-right{display:flex;align-items:center;gap:10px;}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--red);animation:livepulse 1.5s infinite;display:none;}
+@keyframes livepulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(255,71,87,0.4)}50%{opacity:0.7;box-shadow:0 0 0 4px rgba(255,71,87,0)}}
+.live-label{font-size:11px;font-family:var(--mono);color:var(--text2);letter-spacing:1px;text-transform:uppercase;display:none;}
+.refresh-timer{font-size:11px;font-family:var(--mono);color:var(--text3);}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:var(--radius-sm);font-size:13px;font-family:var(--sans);font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text);transition:all 0.15s;}
+.btn:hover{background:var(--border);}
+.btn-primary{background:var(--amber);border-color:var(--amber);color:#080a0e;}
+.btn-primary:hover{background:#ffc84a;border-color:#ffc84a;}
+.btn-danger{background:transparent;border-color:var(--red-border);color:var(--red);}
+.btn-danger:hover{background:var(--red-bg);}
+.btn-sm{padding:5px 10px;font-size:11px;font-family:var(--mono);}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.5rem;}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;position:relative;overflow:hidden;}
+.stat::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.stat.auctions::before{background:var(--red);}
+.stat.bins::before{background:var(--green);}
+.stat.best::before{background:var(--amber);}
+.stat.watched::before{background:var(--purple);}
+.stat-label{font-size:10px;color:var(--text2);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;}
+.stat-val{font-size:32px;font-weight:800;font-family:var(--mono);letter-spacing:-1px;line-height:1;}
+.stat-val.red{color:var(--red);text-shadow:0 0 20px rgba(255,71,87,0.4);}
+.stat-val.green{color:var(--green);text-shadow:0 0 20px rgba(0,214,143,0.4);}
+.stat-val.amber{color:var(--amber);text-shadow:0 0 20px rgba(255,184,48,0.4);}
+.stat-sub{font-size:11px;color:var(--text3);font-family:var(--mono);margin-top:4px;}
+
+/* Filters */
+.filters-bar{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;flex-wrap:wrap;}
+.filter-label{font-size:11px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px;}
+.filter-select{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text2);font-size:12px;padding:5px 10px;font-family:var(--mono);outline:none;cursor:pointer;}
+.pill{padding:4px 12px;border-radius:99px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);cursor:pointer;color:var(--text2);background:transparent;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.5px;}
+.pill.on{background:var(--amber-bg);color:var(--amber);border-color:rgba(255,184,48,0.3);}
+.spacer{flex:1;}
+.watch-count{background:var(--purple);color:#fff;border-radius:99px;font-size:10px;padding:1px 6px;font-family:var(--mono);font-weight:700;margin-left:4px;}
+
+/* Tabs */
+.tabs{display:flex;gap:2px;margin-bottom:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:4px;}
+.tab{flex:1;padding:8px;border-radius:var(--radius-sm);font-size:12px;font-family:var(--mono);font-weight:700;cursor:pointer;text-align:center;color:var(--text2);border:none;background:transparent;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.5px;}
+.tab.on{background:var(--surface3);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,0.3);}
+
+/* Progress */
+.scan-progress{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:1.5rem;display:none;}
+.progress-bar{height:3px;background:var(--surface3);border-radius:2px;overflow:hidden;margin-bottom:8px;}
+.progress-fill{height:100%;background:var(--amber);border-radius:2px;transition:width 0.3s;}
+.progress-label{font-size:11px;color:var(--text2);font-family:var(--mono);}
+
+/* Deal grid */
+.deals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;}
+.deal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:border-color 0.2s,transform 0.15s;}
+.deal:hover{border-color:var(--border2);transform:translateY(-1px);}
+.deal.hot{border-color:var(--red-border);}
+.deal.bin-deal{border-color:var(--green-border);}
+
+/* Max bid box */
+.max-bid-box{margin:8px 14px 0;padding:8px 12px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between;background:var(--surface3);border:1px solid var(--border);}
+.max-bid-box.good-deal{background:rgba(0,214,143,0.08);border-color:rgba(0,214,143,0.25);}
+.max-bid-box.over{background:var(--red-bg);border-color:var(--red-border);}
+.max-bid-label{font-size:10px;color:var(--text2);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px;}
+.max-bid-val{font-size:16px;font-weight:800;font-family:var(--mono);}
+.max-bid-val.good{color:var(--green);}
+.max-bid-val.over{color:var(--red);}
+.max-bid-sub{font-size:10px;color:var(--text3);font-family:var(--mono);text-align:right;line-height:1.4;}
+.cost-breakdown{margin:4px 14px 0;font-size:10px;color:var(--text3);font-family:var(--mono);display:flex;gap:10px;flex-wrap:wrap;}
+
+/* Deal type badge */
+.deal-header{padding:12px 14px 0;}
+.deal-type{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;}
+.deal-type.auction{color:var(--red);}
+.deal-type.bin{color:var(--green);}
+.type-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.auction .type-dot{background:var(--red);}
+.bin .type-dot{background:var(--green);}
+.deal-name{font-size:13px;font-weight:700;color:var(--text);line-height:1.3;margin-bottom:3px;}
+.deal-set{font-size:11px;color:var(--text2);font-family:var(--mono);margin-bottom:8px;}
+.grade-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-family:var(--mono);padding:3px 8px;border-radius:4px;background:var(--surface3);color:var(--text2);border:1px solid var(--border);margin-bottom:10px;}
+
+/* Prices */
+.deal-prices{display:grid;grid-template-columns:1fr 1fr;gap:0;background:var(--surface2);padding:10px 14px;}
+.price-col{}
+.price-col-label{font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;}
+.price-col-val{font-size:19px;font-weight:800;font-family:var(--mono);}
+.price-col-val.live{color:var(--green);}
+.price-col-val.avg{color:var(--text2);}
+.price-col-sub{font-size:10px;color:var(--text3);font-family:var(--mono);margin-top:2px;}
+
+/* Discount */
+.deal-discount{margin:10px 14px 0;padding:8px 12px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between;}
+.deal-discount.great{background:var(--red-bg);border:1px solid var(--red-border);}
+.deal-discount.good{background:var(--amber-bg);border:1px solid rgba(255,184,48,0.2);}
+.deal-discount.ok{background:var(--surface3);border:1px solid var(--border);}
+.disc-pct{font-size:22px;font-weight:800;font-family:var(--mono);}
+.great .disc-pct{color:var(--red);}
+.good .disc-pct{color:var(--amber);}
+.ok .disc-pct{color:var(--text2);}
+.disc-meta{text-align:right;}
+.disc-saving{font-size:13px;font-weight:700;color:var(--text);}
+.disc-label{font-size:10px;color:var(--text2);font-family:var(--mono);}
+
+/* Sales context */
+.sales-context{margin:8px 14px 0;font-size:11px;color:var(--text3);font-family:var(--mono);display:flex;align-items:center;gap:6px;}
+.sales-dots{display:flex;gap:3px;align-items:center;}
+.sale-dot{width:6px;height:6px;border-radius:50%;background:var(--surface3);border:1px solid var(--border);}
+.sale-dot.filled{background:var(--amber);border-color:var(--amber);}
+
+/* Timer */
+.deal-timer{margin:8px 14px 0;display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);}
+.timer-val{color:var(--red);font-weight:700;}
+.timer-val.safe{color:var(--amber);}
+
+/* Actions */
+.deal-actions{padding:10px 14px 12px;display:flex;gap:6px;margin-top:8px;}
+.deal-btn{flex:1;padding:7px 8px;border-radius:var(--radius-sm);font-size:11px;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text2);text-decoration:none;text-align:center;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:4px;font-weight:700;}
+.deal-btn:hover{background:var(--border);color:var(--text);}
+.deal-btn.primary{background:var(--amber);border-color:var(--amber);color:#080a0e;}
+.deal-btn.primary:hover{background:#ffc84a;}
+.deal-btn.watch-btn{border-color:rgba(167,139,250,0.3);color:var(--purple);}
+.deal-btn.watch-btn:hover{background:rgba(167,139,250,0.08);}
+.deal-btn.watching{background:rgba(167,139,250,0.1);border-color:rgba(167,139,250,0.4);color:var(--purple);}
+
+/* Hot badge */
+.hot-badge{position:absolute;top:10px;right:10px;font-size:9px;font-family:var(--mono);font-weight:700;color:var(--red);background:var(--red-bg);border:1px solid var(--red-border);padding:2px 6px;border-radius:3px;letter-spacing:1px;}
+
+/* Empty / loading */
+.empty{text-align:center;padding:4rem 2rem;color:var(--text2);}
+.empty-icon{font-size:40px;margin-bottom:12px;opacity:0.4;}
+.loading{display:flex;align-items:center;justify-content:center;gap:10px;padding:3rem;color:var(--text2);font-family:var(--mono);font-size:13px;}
+.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--amber);border-radius:50%;animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);z-index:100;display:flex;align-items:center;justify-content:center;padding:1rem;}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;}
+.modal-title{font-size:16px;font-weight:800;margin-bottom:4px;}
+.modal-sub{font-size:13px;color:var(--text2);margin-bottom:1.5rem;line-height:1.6;}
+.section-label{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono);margin-bottom:10px;margin-top:1.25rem;}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
+.field label{font-size:11px;color:var(--text2);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px;}
+.field input,.field select{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;padding:8px 10px;font-family:var(--sans);outline:none;transition:border-color 0.15s;}
+.field input:focus{border-color:var(--blue);}
+.field input[type=password]{letter-spacing:2px;}
+.field input[type=password]::placeholder{letter-spacing:0;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.modal-actions{display:flex;gap:8px;margin-top:1.25rem;flex-wrap:wrap;}
+.status-msg{font-size:12px;font-family:var(--mono);margin-top:10px;display:none;padding:8px 10px;border-radius:var(--radius-sm);background:var(--surface2);}
+
+/* Toast */
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);padding:12px 16px;font-size:13px;z-index:200;transform:translateY(100px);opacity:0;transition:all 0.3s;max-width:300px;box-shadow:0 8px 32px rgba(0,0,0,0.4);}
+.toast.show{transform:translateY(0);opacity:1;}
+.toast.alert-toast{border-color:var(--red-border);}
+.toast-title{font-weight:700;margin-bottom:2px;}
+.toast-body{font-size:12px;color:var(--text2);}
+
+@media(max-width:600px){
+  .app{padding:1rem;}
+  .stats{grid-template-columns:1fr 1fr;}
+  .deals-grid{grid-template-columns:1fr;}
+  .header-title{font-size:16px;}
+  .filters-bar{gap:6px;}
+  .grid2{grid-template-columns:1fr;}
+}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+        <circle cx="18" cy="18" r="17" stroke="#ffb830" stroke-width="1.5" opacity="0.4"/>
+        <line x1="1" y1="18" x2="35" y2="18" stroke="#ffb830" stroke-width="1.5" opacity="0.4"/>
+        <circle cx="18" cy="18" r="6" stroke="#ffb830" stroke-width="1.5"/>
+        <circle cx="18" cy="18" r="3" fill="#ffb830"/>
+      </svg>
+      <div class="header-title">Ric <span>Flipper</span></div>
+    </div>
+    <div class="header-right">
+      <div class="live-dot" id="live-dot"></div>
+      <div class="live-label" id="live-label">Live</div>
+      <div class="refresh-timer" id="refresh-timer"></div>
+      <button class="btn btn-sm" onclick="openSettings()">⚙ Settings</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat auctions">
+      <div class="stat-label">Auctions Ending</div>
+      <div class="stat-val red" id="stat-auctions">0</div>
+      <div class="stat-sub">within window</div>
+    </div>
+    <div class="stat bins">
+      <div class="stat-label">BIN Deals</div>
+      <div class="stat-val green" id="stat-bins">0</div>
+      <div class="stat-sub">below avg</div>
+    </div>
+    <div class="stat best">
+      <div class="stat-label">Best Discount</div>
+      <div class="stat-val amber" id="stat-best">—</div>
+      <div class="stat-sub">top deal</div>
+    </div>
+    <div class="stat watched">
+      <div class="stat-label">Watchlist</div>
+      <div class="stat-val" id="stat-watched">0</div>
+      <div class="stat-sub">saved cards</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters-bar">
+    <button class="pill on" onclick="setPill('all',this)">All</button>
+    <button class="pill" onclick="setPill('auction',this)">Auctions</button>
+    <button class="pill" onclick="setPill('bin',this)">BIN</button>
+    <span class="filter-label" style="margin-left:6px;">Discount</span>
+    <select class="filter-select" id="f-discount" onchange="renderDeals()">
+      <option value="0">Any %</option>
+      <option value="10">10%+</option>
+      <option value="15" selected>15%+</option>
+      <option value="20">20%+</option>
+      <option value="30">30%+</option>
+      <option value="40">40%+</option>
+      <option value="50">50%+</option>
+    </select>
+    <span class="filter-label">Grade</span>
+    <select class="filter-select" id="f-grade" onchange="renderDeals()">
+      <option value="all">All grades</option>
+      <option value="PSA 10">PSA 10</option>
+      <option value="PSA 9">PSA 9</option>
+      <option value="BGS 10">BGS 10</option>
+      <option value="BGS 9.5">BGS 9.5</option>
+      <option value="CGC 10">CGC 10</option>
+      <option value="SGC 10">SGC 10</option>
+    </select>
+    <span class="filter-label">Min $</span>
+    <select class="filter-select" id="f-minval" onchange="renderDeals()">
+      <option value="100">$100+</option>
+      <option value="250" selected>$250+</option>
+      <option value="500">$500+</option>
+      <option value="1000">$1,000+</option>
+      <option value="2500">$2,500+</option>
+    </select>
+    <span class="filter-label">Sort</span>
+    <select class="filter-select" id="f-sort" onchange="renderDeals()">
+      <option value="discount">Best discount</option>
+      <option value="ending">Ending soonest</option>
+      <option value="saving">Most $ saved</option>
+      <option value="value">Highest value</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="pill" id="watch-pill" onclick="setTab('watchlist',this)">⭐ Watchlist <span class="watch-count" id="watch-count">0</span></button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab on" onclick="setTab('all',this)">All Deals</button>
+    <button class="tab" onclick="setTab('auction',this)">🔴 Auctions Ending</button>
+    <button class="tab" onclick="setTab('bin',this)">🟢 Buy It Now</button>
+    <button class="tab" onclick="setTab('watchlist',this)">⭐ Watchlist</button>
+  </div>
+
+  <!-- Progress -->
+  <div class="scan-progress" id="scan-progress">
+    <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
+    <div class="progress-label" id="prog-label">Starting scan...</div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-area">
+    <div class="empty">
+      <div class="empty-icon">📡</div>
+      <p>Open <strong>Settings</strong> and enter your eBay API credentials to start scanning for deals.</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal" style="display:none" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <div class="modal-title">Settings</div>
+    <div class="modal-sub">Enter your eBay Developer credentials. All data is saved locally — never sent anywhere except eBay's API.</div>
+
+    <div class="section-label">eBay API Credentials</div>
+    <div class="field"><label>App ID (Client ID)</label><input type="password" id="s-app-id" placeholder="Your App ID"></div>
+    <div class="field"><label>Cert ID (Client Secret)</label><input type="password" id="s-cert-id" placeholder="Your Cert ID"></div>
+
+    <div class="section-label">Resale Cost Settings</div>
+    <div class="grid2">
+      <div class="field"><label>eBay selling fee (%)</label><input type="number" id="s-ebayfee" value="13" min="0" max="30" step="0.5"></div>
+      <div class="field"><label>Shipping cost ($)</label><input type="number" id="s-shipping" value="15" min="0" step="1"></div>
+    </div>
+    <div class="field" style="margin-bottom:12px;">
+      <label>Profit target per card ($)</label>
+      <input type="number" id="s-profit" value="50" min="0" step="10">
+    </div>
+    <div class="field" style="flex-direction:row;align-items:center;gap:10px;margin-bottom:12px;">
+      <input type="checkbox" id="s-feecheck" checked style="width:16px;height:16px;accent-color:var(--amber);cursor:pointer;">
+      <label for="s-feecheck" style="font-size:13px;color:var(--text2);cursor:pointer;text-transform:none;letter-spacing:0;">Include eBay fees in calculations</label>
+    </div>
+    <div class="section-label">Scan Settings</div>
+    <div class="grid2">
+      <div class="field"><label>Refresh every (min)</label><input type="number" id="s-interval" value="5" min="2" max="60"></div>
+      <div class="field"><label>Auction window (hrs)</label><input type="number" id="s-window" value="4" min="1" max="24"></div>
+      <div class="field"><label>Alert threshold (%)</label><input type="number" id="s-threshold" value="15" min="1" max="90"></div>
+      <div class="field"><label>Last N sales for avg</label><input type="number" id="s-sales" value="5" min="3" max="20"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveSettings()">Save &amp; Start</button>
+      <button class="btn" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="testConn()" style="margin-left:auto;">Test connection</button>
+    </div>
+    <div class="status-msg" id="status-msg"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <div class="toast-title" id="toast-title"></div>
+  <div class="toast-body" id="toast-body"></div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let cfg={appId:'',certId:'',interval:5,window:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
+let deals=[], watchlist=new Set();
+let currentTab='all', typeFilter='all';
+let accessToken='', tokenExpiry=0;
+let scanTimer=null, cdTimer=null, cdSecs=0;
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded',()=>{
+  loadAll();
+  if(cfg.appId&&cfg.certId){ startScanning(); }
+  else { openSettings(); }
+});
+
+// ── Persist ───────────────────────────────────────────────────────────────────
+function loadAll(){
+  try{ const s=localStorage.getItem('ds_cfg'); if(s) cfg={...cfg,...JSON.parse(s)}; }catch(e){}
+  try{ const w=localStorage.getItem('ds_watch'); if(w) watchlist=new Set(JSON.parse(w)); }catch(e){}
+  updateWatchCount();
+}
+function saveCfg(){ localStorage.setItem('ds_cfg',JSON.stringify(cfg)); }
+function saveWatch(){ localStorage.setItem('ds_watch',JSON.stringify([...watchlist])); }
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function openSettings(){
+  document.getElementById('s-app-id').value=cfg.appId||'';
+  document.getElementById('s-cert-id').value=cfg.certId||'';
+  document.getElementById('s-interval').value=cfg.interval;
+  document.getElementById('s-window').value=cfg.window;
+  document.getElementById('s-threshold').value=cfg.threshold;
+  document.getElementById('s-sales').value=cfg.salesCount;
+  document.getElementById('s-ebayfee').value=cfg.ebayFee;
+  document.getElementById('s-shipping').value=cfg.shipping;
+  document.getElementById('s-profit').value=cfg.profitTarget;
+  document.getElementById('s-feecheck').checked=cfg.ebayFeesOn;
+  document.getElementById('settings-modal').style.display='flex';
+}
+function closeSettings(){ document.getElementById('settings-modal').style.display='none'; }
+function saveSettings(){
+  cfg.appId=document.getElementById('s-app-id').value.trim();
+  cfg.certId=document.getElementById('s-cert-id').value.trim();
+  cfg.interval=parseInt(document.getElementById('s-interval').value)||5;
+  cfg.window=parseInt(document.getElementById('s-window').value)||4;
+  cfg.threshold=parseInt(document.getElementById('s-threshold').value)||15;
+  cfg.salesCount=parseInt(document.getElementById('s-sales').value)||5;
+  cfg.ebayFee=parseFloat(document.getElementById('s-ebayfee').value)||13;
+  cfg.shipping=parseFloat(document.getElementById('s-shipping').value)||15;
+  cfg.profitTarget=parseFloat(document.getElementById('s-profit').value)||50;
+  cfg.ebayFeesOn=document.getElementById('s-feecheck').checked;
+  saveCfg(); closeSettings();
+  showToast('Settings saved','Starting scanner...');
+  startScanning();
+}
+async function testConn(){
+  const msg=document.getElementById('status-msg');
+  msg.style.display='block'; msg.style.color='var(--text2)'; msg.textContent='Testing...';
+  const appId=document.getElementById('s-app-id').value.trim();
+  const certId=document.getElementById('s-cert-id').value.trim();
+  if(!appId||!certId){msg.style.color='var(--red)';msg.textContent='App ID and Cert ID required';return;}
+  try{
+    const t=await fetchToken(appId,certId);
+    msg.style.color=t?'var(--green)':'var(--red)';
+    msg.textContent=t?'✓ Connected successfully':'✗ Auth failed — check credentials';
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+}
+
+// ── eBay OAuth ────────────────────────────────────────────────────────────────
+async function fetchToken(appId,certId){
+  const res=await fetch('https://api.ebay.com/identity/v1/oauth2/token',{
+    method:'POST',
+    headers:{
+      'Authorization':'Basic '+btoa(`${appId}:${certId}`),
+      'Content-Type':'application/x-www-form-urlencoded'
+    },
+    body:'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope'
+  });
+  const d=await res.json();
+  if(d.access_token){
+    accessToken=d.access_token;
+    tokenExpiry=Date.now()+(d.expires_in-60)*1000;
+    return accessToken;
+  }
+  throw new Error(d.error_description||'Auth failed');
+}
+async function getToken(){
+  if(accessToken&&Date.now()<tokenExpiry) return accessToken;
+  return fetchToken(cfg.appId,cfg.certId);
+}
+
+// ── eBay Browse API ───────────────────────────────────────────────────────────
+async function ebaySearch(token, filter, sort, limit=50){
+  const minVal=document.getElementById('f-minval')?.value||250;
+  const gradeF=document.getElementById('f-grade')?.value||'all';
+  let q='pokemon card graded -proxy -fake -reprint -replica -custom -lot';
+  if(gradeF!=='all') q=`pokemon card ${gradeF} -proxy -fake -reprint`;
+
+  const params=new URLSearchParams({
+    q, category_ids:'183454',
+    filter:`${filter},price:[${minVal}..],priceCurrency:USD,conditionIds:{3000}`,
+    sort, limit,
+    fieldgroups:'EXTENDED'
+  });
+
+  const res=await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,{
+    headers:{ 'Authorization':`Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID':'EBAY_US' }
+  });
+  const d=await res.json();
+  return d.itemSummaries||[];
+}
+
+async function ebaySoldSearch(token, query, grade, limit){
+  // Use Finding API for completed/sold listings
+  const q=`${query} ${grade} -proxy -fake -reprint`;
+  const params=new URLSearchParams({
+    'OPERATION-NAME':'findCompletedItems',
+    'SERVICE-VERSION':'1.13.0',
+    'SECURITY-APPNAME':cfg.appId,
+    'RESPONSE-DATA-FORMAT':'JSON',
+    'keywords':q,
+    'categoryId':'183454',
+    'itemFilter(0).name':'SoldItemsOnly',
+    'itemFilter(0).value':'true',
+    'itemFilter(1).name':'Condition',
+    'itemFilter(1).value':'3000',
+    'sortOrder':'EndTimeSoonest',
+    'paginationInput.entriesPerPage':limit
+  });
+  const res=await fetch(`https://svcs.ebay.com/services/search/FindingService/v1?${params}`);
+  const d=await res.json();
+  return d?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item||[];
+}
+
+// ── Grade detection ───────────────────────────────────────────────────────────
+function detectGrade(title){
+  const t=title.toUpperCase();
+  if(/PSA\s*10|PSA\s*GEM\s*MT/.test(t)) return 'PSA 10';
+  if(/PSA\s*9\.5/.test(t)) return 'PSA 9.5';
+  if(/PSA\s*9[^.]/.test(t)) return 'PSA 9';
+  if(/PSA\s*8/.test(t)) return 'PSA 8';
+  if(/PSA\s*7/.test(t)) return 'PSA 7';
+  if(/BGS\s*10|BGS\s*BLACK/.test(t)) return 'BGS 10';
+  if(/BGS\s*9\.5/.test(t)) return 'BGS 9.5';
+  if(/BGS\s*9[^.]/.test(t)) return 'BGS 9';
+  if(/CGC\s*10/.test(t)) return 'CGC 10';
+  if(/CGC\s*9\.5/.test(t)) return 'CGC 9.5';
+  if(/CGC\s*9[^.]/.test(t)) return 'CGC 9';
+  if(/SGC\s*10/.test(t)) return 'SGC 10';
+  if(/SGC\s*9/.test(t)) return 'SGC 9';
+  return null;
+}
+
+// ── Avg from last N sold ──────────────────────────────────────────────────────
+const soldCache={};
+async function getAvgFromSold(token, title, grade){
+  const key=`${title.substring(0,40)}_${grade}`;
+  if(soldCache[key]) return soldCache[key];
+
+  // Extract card name (strip grade info for cleaner search)
+  const cleanTitle=title.replace(/PSA|BGS|CGC|SGC|GEM|MINT|\d+\.\d+|\bGM\b|\bMT\b/gi,'').replace(/\s+/g,' ').trim().substring(0,50);
+
+  const soldItems=await ebaySoldSearch(token, cleanTitle, grade, cfg.salesCount+5);
+  const prices=soldItems
+    .map(i=>parseFloat(i?.sellingStatus?.[0]?.currentPrice?.[0]?.['__value__']||0))
+    .filter(p=>p>50)
+    .slice(0,cfg.salesCount);
+
+  if(prices.length<2) return null;
+
+  const avg=prices.reduce((a,b)=>a+b,0)/prices.length;
+  const result={avg, count:prices.length, prices};
+  soldCache[key]=result;
+  return result;
+}
+
+// ── Main scan ─────────────────────────────────────────────────────────────────
+async function runScan(){
+  if(!cfg.appId||!cfg.certId){ showEmpty('Add your eBay API credentials in Settings to begin.'); return; }
+
+  showLoading();
+  setProg(0,'Getting eBay token...');
+  document.getElementById('scan-progress').style.display='block';
+  document.getElementById('live-dot').style.display='inline-block';
+  document.getElementById('live-label').style.display='inline-block';
+
+  try{
+    const token=await getToken();
+    setProg(15,'Searching active auctions ending soon...');
+
+    const endTime=new Date(Date.now()+cfg.window*3600000).toISOString();
+    const [auctionItems, binItems]=await Promise.all([
+      ebaySearch(token,`buyingOptions:{AUCTION},endDate:[..${endTime}]`,'endingSoonest',50),
+      ebaySearch(token,'buyingOptions:{FIXED_PRICE}','price',50)
+    ]);
+
+    setProg(35,`Found ${auctionItems.length} auctions + ${binItems.length} BIN — calculating averages...`);
+
+    const newDeals=[];
+    const allItems=[
+      ...auctionItems.map(i=>({...i,ltype:'auction'})),
+      ...binItems.map(i=>({...i,ltype:'bin'}))
+    ];
+
+    let done=0;
+    for(const item of allItems){
+      const title=item.title||'';
+      const grade=detectGrade(title);
+      if(!grade){ done++; continue; }
+
+      const currentPrice=parseFloat(item.price?.value||0);
+      if(!currentPrice){ done++; continue; }
+
+      setProg(35+Math.round((done/allItems.length)*55),`Checking sold history... ${done+1}/${allItems.length}: ${title.substring(0,35)}...`);
+
+      const soldData=await getAvgFromSold(token, title, grade);
+      if(soldData&&soldData.avg>0){
+        const discPct=Math.round(((soldData.avg-currentPrice)/soldData.avg)*100);
+        const saving=soldData.avg-currentPrice;
+
+        // Resale cost calculations
+        const ebayFeeAmt=cfg.ebayFeesOn?(soldData.avg*(cfg.ebayFee/100)):0;
+        const totalCosts=ebayFeeAmt+cfg.shipping;
+        const netAfterCosts=soldData.avg-totalCosts;
+        const maxBid=netAfterCosts-cfg.profitTarget;
+        const projectedProfit=currentPrice<=maxBid?(netAfterCosts-currentPrice):null;
+        const isBelowMaxBid=currentPrice<=maxBid;
+
+        if(discPct>0){
+          const isHot=discPct>=cfg.threshold&&isBelowMaxBid;
+          newDeals.push({
+            id: item.itemId||Math.random().toString(),
+            title, grade, currentPrice,
+            avg: soldData.avg, salesCount: soldData.count, recentPrices: soldData.prices,
+            discPct, saving, ltype: item.ltype,
+            endTime: item.itemEndDate||null,
+            url: item.itemWebUrl||`https://www.ebay.com/itm/${item.itemId}`,
+            isHot, maxBid, projectedProfit, isBelowMaxBid,
+            ebayFeeAmt, shipping: cfg.shipping, totalCosts, netAfterCosts
+          });
+          if(isHot) showToast(`🔥 ${discPct}% below avg!`,`${title.substring(0,45)}... at $${currentPrice.toFixed(0)} — max bid $${Math.round(maxBid)}`,true);
+        }
+      }
+      done++;
+      await new Promise(r=>setTimeout(r,100));
+    }
+
+    deals=newDeals;
+    setProg(100,'Scan complete');
+    setTimeout(()=>document.getElementById('scan-progress').style.display='none',2000);
+    updateStats();
+    renderDeals();
+    startTimers();
+
+  }catch(e){
+    document.getElementById('scan-progress').style.display='none';
+    showEmpty(`Scan error: ${e.message} — check your credentials in Settings.`);
+  }
+}
+
+// ── Scanning loop ─────────────────────────────────────────────────────────────
+function startScanning(){
+  if(scanTimer) clearInterval(scanTimer);
+  runScan();
+  scanTimer=setInterval(runScan, cfg.interval*60000);
+  startCd();
+}
+function startCd(){
+  if(cdTimer) clearInterval(cdTimer);
+  cdSecs=cfg.interval*60;
+  cdTimer=setInterval(()=>{
+    cdSecs--;
+    const m=Math.floor(cdSecs/60), s=cdSecs%60;
+    document.getElementById('refresh-timer').textContent=`Next scan ${m}:${s.toString().padStart(2,'0')}`;
+    if(cdSecs<=0) cdSecs=cfg.interval*60;
+  },1000);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderDeals(){
+  const discMin=parseInt(document.getElementById('f-discount')?.value||0);
+  const gradeF=document.getElementById('f-grade')?.value||'all';
+  const minVal=parseFloat(document.getElementById('f-minval')?.value||250);
+  const sort=document.getElementById('f-sort')?.value||'discount';
+
+  let list=deals.filter(d=>{
+    if(currentTab==='auction'&&d.ltype!=='auction') return false;
+    if(currentTab==='bin'&&d.ltype!=='bin') return false;
+    if(currentTab==='watchlist'&&!watchlist.has(d.id)) return false;
+    if(typeFilter==='auction'&&d.ltype!=='auction') return false;
+    if(typeFilter==='bin'&&d.ltype!=='bin') return false;
+    if(d.discPct<discMin) return false;
+    if(gradeF!=='all'&&d.grade!==gradeF) return false;
+    if(d.currentPrice<minVal) return false;
+    return true;
+  });
+
+  if(sort==='discount') list.sort((a,b)=>b.discPct-a.discPct);
+  else if(sort==='ending') list.sort((a,b)=>new Date(a.endTime||'9999')-new Date(b.endTime||'9999'));
+  else if(sort==='saving') list.sort((a,b)=>b.saving-a.saving);
+  else if(sort==='value') list.sort((a,b)=>b.avg-a.avg);
+
+  const area=document.getElementById('results-area');
+  if(!list.length){
+    area.innerHTML=`<div class="empty"><div class="empty-icon">${deals.length?'🔎':'📡'}</div><p>${deals.length?'No deals match your filters — try lowering the discount threshold.':'Scanning for deals...'}</p></div>`;
+    return;
+  }
+  area.innerHTML=`<div class="deals-grid">${list.map(cardHTML).join('')}</div>`;
+}
+
+function cardHTML(d){
+  const isAuction=d.ltype==='auction';
+  const dc=d.discPct>=30?'great':d.discPct>=15?'good':'ok';
+  const isWatched=watchlist.has(d.id);
+
+  // Sales dots — show how many of N sales used
+  const dots=Array.from({length:cfg.salesCount},(_,i)=>`<div class="sale-dot${i<d.salesCount?' filled':''}"></div>`).join('');
+
+  let timer='';
+  if(isAuction&&d.endTime){
+    const ms=new Date(d.endTime)-Date.now();
+    if(ms>0){
+      const h=Math.floor(ms/3600000), m=Math.floor((ms%3600000)/60000);
+      const urgent=ms<3600000;
+      timer=`<div class="deal-timer">⏱ <span class="timer-val${urgent?'':' safe'}" data-end="${d.endTime}">${h}h ${m}m</span> remaining${urgent?' — ending soon!':''}</div>`;
+    }
+  }
+
+  // Recent prices mini list
+  const priceList=d.recentPrices?d.recentPrices.map(p=>'$'+Math.round(p).toLocaleString()).join(' · '):'';
+
+  return `<div class="deal${d.isHot?' hot':''}${!isAuction?' bin-deal':''}" style="position:relative;">
+    ${d.isHot?'<div class="hot-badge">HOT</div>':''}
+    <div class="deal-header">
+      <div class="deal-type ${isAuction?'auction':'bin'}"><div class="type-dot"></div>${isAuction?'Auction':'Buy It Now'}</div>
+      <div class="deal-name">${d.title.substring(0,58)}${d.title.length>58?'...':''}</div>
+      <div class="grade-badge">${d.grade}</div>
+    </div>
+    <div class="deal-prices">
+      <div class="price-col">
+        <div class="price-col-label">${isAuction?'Current bid':'Listed price'}</div>
+        <div class="price-col-val live">$${d.currentPrice.toFixed(0)}</div>
+        <div class="price-col-sub">${isAuction?'live':'buy now'}</div>
+      </div>
+      <div class="price-col">
+        <div class="price-col-label">Avg last ${d.salesCount} sold</div>
+        <div class="price-col-val avg">$${Math.round(d.avg).toLocaleString()}</div>
+        <div class="price-col-sub">${priceList}</div>
+      </div>
+    </div>
+    <div class="deal-discount ${dc}">
+      <div class="disc-pct">${d.discPct}% below</div>
+      <div class="disc-meta">
+        <div class="disc-saving">Save $${Math.round(d.saving).toLocaleString()}</div>
+        <div class="disc-label">vs ${d.salesCount}-sale avg</div>
+      </div>
+    </div>
+    <div class="max-bid-box ${d.isBelowMaxBid?'good-deal':'over'}">
+      <div>
+        <div class="max-bid-label">Max bid to profit $${cfg.profitTarget}</div>
+        <div class="max-bid-val ${d.isBelowMaxBid?'good':'over'}">$${Math.round(d.maxBid).toLocaleString()}</div>
+      </div>
+      <div class="max-bid-sub">
+        ${d.isBelowMaxBid
+          ?`<span style="color:var(--green);">✓ Est. profit $${Math.round(d.projectedProfit).toLocaleString()}</span>`
+          :`<span style="color:var(--red);">✗ Over by $${Math.round(d.currentPrice-d.maxBid).toLocaleString()}</span>`
+        }<br>
+        eBay ${cfg.ebayFeesOn?cfg.ebayFee+'%':'off'} · Ship $${cfg.shipping}
+      </div>
+    </div>
+    <div class="sales-context">
+      <span>Based on</span>
+      <div class="sales-dots">${dots}</div>
+      <span>${d.salesCount} recent sales</span>
+    </div>
+    ${timer}
+    <div class="deal-actions">
+      <a href="${d.url}" target="_blank" class="deal-btn primary">View on eBay ↗</a>
+      <button class="deal-btn watch-btn${isWatched?' watching':''}" onclick="toggleWatch('${d.id}',this)">${isWatched?'★ Watching':'☆ Watch'}</button>
+    </div>
+  </div>`;
+}
+
+// ── Timers on cards ───────────────────────────────────────────────────────────
+function startTimers(){
+  setInterval(()=>{
+    document.querySelectorAll('[data-end]').forEach(el=>{
+      const ms=new Date(el.dataset.end)-Date.now();
+      if(ms<=0){el.textContent='Ended';return;}
+      const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000),s=Math.floor((ms%60000)/1000);
+      el.textContent=h>0?`${h}h ${m}m`:`${m}m ${s}s`;
+      if(ms<3600000) el.classList.remove('safe');
+    });
+  },1000);
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+function setPill(type,el){
+  typeFilter=type;
+  document.querySelectorAll('.filters-bar .pill').forEach(p=>p.classList.remove('on'));
+  el.classList.add('on');
+  renderDeals();
+}
+function setTab(tab,el){
+  currentTab=tab;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  renderDeals();
+}
+
+// ── Watchlist ─────────────────────────────────────────────────────────────────
+function toggleWatch(id,btn){
+  if(watchlist.has(id)){watchlist.delete(id);btn.className='deal-btn watch-btn';btn.textContent='☆ Watch';}
+  else{watchlist.add(id);btn.className='deal-btn watch-btn watching';btn.textContent='★ Watching';}
+  saveWatch(); updateWatchCount();
+}
+function updateWatchCount(){
+  const c=watchlist.size;
+  document.getElementById('watch-count').textContent=c;
+  document.getElementById('stat-watched').textContent=c;
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats(){
+  document.getElementById('stat-auctions').textContent=deals.filter(d=>d.ltype==='auction').length;
+  document.getElementById('stat-bins').textContent=deals.filter(d=>d.ltype==='bin').length;
+  const best=deals.length?Math.max(...deals.map(d=>d.discPct)):0;
+  document.getElementById('stat-best').textContent=best?best+'%':'—';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function setProg(pct,label){
+  document.getElementById('prog-fill').style.width=pct+'%';
+  document.getElementById('prog-label').textContent=label;
+}
+function showLoading(){
+  document.getElementById('results-area').innerHTML='<div class="loading"><div class="spinner"></div>Scanning eBay for deals...</div>';
+}
+function showEmpty(msg){
+  document.getElementById('results-area').innerHTML=`<div class="empty"><div class="empty-icon">📡</div><p>${msg}</p></div>`;
+}
+function showToast(title,body,alert=false){
+  const t=document.getElementById('toast');
+  document.getElementById('toast-title').textContent=title;
+  document.getElementById('toast-body').textContent=body;
+  t.className='toast'+(alert?' alert-toast':'');
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),4500);
+}
+</script>
+</body>
+</html>
