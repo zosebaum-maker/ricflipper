@@ -322,6 +322,8 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
     <div class="section-label">eBay API Credentials</div>
     <div class="field"><label>App ID (Client ID)</label><input type="password" id="s-app-id" placeholder="Your App ID"></div>
     <div class="field"><label>Cert ID (Client Secret)</label><input type="password" id="s-cert-id" placeholder="Your Cert ID"></div>
+    <div class="field" style="margin-top:4px;"><label>Cloudflare Worker URL</label><input type="text" id="s-worker-url" placeholder="https://ric-flipper-proxy.YOUR-NAME.workers.dev"></div>
+
 
     <div class="section-label">Resale Cost Settings</div>
     <div class="grid2">
@@ -361,16 +363,15 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let cfg={appId:'',certId:'',interval:5,window:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
+let cfg={appId:'',certId:'',workerUrl:'',interval:5,window:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
 let deals=[], watchlist=new Set();
 let currentTab='all', typeFilter='all';
-let accessToken='', tokenExpiry=0;
 let scanTimer=null, cdTimer=null, cdSecs=0;
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded',()=>{
   loadAll();
-  if(cfg.appId&&cfg.certId){ startScanning(); }
+  if(cfg.appId&&cfg.certId&&cfg.workerUrl){ startScanning(); } else { openSettings(); }
   else { openSettings(); }
 });
 
@@ -387,6 +388,8 @@ function saveWatch(){ localStorage.setItem('ds_watch',JSON.stringify([...watchli
 function openSettings(){
   document.getElementById('s-app-id').value=cfg.appId||'';
   document.getElementById('s-cert-id').value=cfg.certId||'';
+  document.getElementById('s-worker-url').value=cfg.workerUrl||'';
+
   document.getElementById('s-interval').value=cfg.interval;
   document.getElementById('s-window').value=cfg.window;
   document.getElementById('s-threshold').value=cfg.threshold;
@@ -401,6 +404,8 @@ function closeSettings(){ document.getElementById('settings-modal').style.displa
 function saveSettings(){
   cfg.appId=document.getElementById('s-app-id').value.trim();
   cfg.certId=document.getElementById('s-cert-id').value.trim();
+  cfg.workerUrl=document.getElementById('s-worker-url').value.trim().replace(/\/$/,'');
+
   cfg.interval=parseInt(document.getElementById('s-interval').value)||5;
   cfg.window=parseInt(document.getElementById('s-window').value)||4;
   cfg.threshold=parseInt(document.getElementById('s-threshold').value)||15;
@@ -415,26 +420,32 @@ function saveSettings(){
 }
 async function testConn(){
   const msg=document.getElementById('status-msg');
-  msg.style.display='block'; msg.style.color='var(--text2)'; msg.textContent='Testing...';
+  msg.style.display='block'; msg.style.color='var(--text2)'; msg.textContent='Testing connection...';
   const appId=document.getElementById('s-app-id').value.trim();
   const certId=document.getElementById('s-cert-id').value.trim();
-  if(!appId||!certId){msg.style.color='var(--red)';msg.textContent='App ID and Cert ID required';return;}
+  const workerUrl=document.getElementById('s-worker-url').value.trim().replace(/\/$/,'');
+  if(!appId||!certId||!workerUrl){msg.style.color='var(--red)';msg.textContent='All three fields required';return;}
   try{
-    const t=await fetchToken(appId,certId);
-    msg.style.color=t?'var(--green)':'var(--red)';
-    msg.textContent=t?'✓ Connected successfully':'✗ Auth failed — check credentials';
-  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ '+e.message; }
+    const res=await fetch(`${workerUrl}?action=token`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({appId, certId})
+    });
+    const d=await res.json();
+    msg.style.color=d.access_token?'var(--green)':'var(--red)';
+    msg.textContent=d.access_token?'✓ Connected successfully — ready to scan':'✗ Auth failed: '+(d.error_description||'Check credentials');
+  }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ Worker error: '+e.message; }
 }
 
-// ── eBay OAuth ────────────────────────────────────────────────────────────────
-async function fetchToken(appId,certId){
-  const res=await fetch('https://api.ebay.com/identity/v1/oauth2/token',{
+// ── Worker API calls ─────────────────────────────────────────────────────────
+let accessToken='', tokenExpiry=0;
+
+async function getToken(){
+  if(accessToken&&Date.now()<tokenExpiry) return accessToken;
+  const res=await fetch(`${cfg.workerUrl}?action=token`,{
     method:'POST',
-    headers:{
-      'Authorization':'Basic '+btoa(`${appId}:${certId}`),
-      'Content-Type':'application/x-www-form-urlencoded'
-    },
-    body:'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope'
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({appId:cfg.appId, certId:cfg.certId})
   });
   const d=await res.json();
   if(d.access_token){
@@ -444,50 +455,26 @@ async function fetchToken(appId,certId){
   }
   throw new Error(d.error_description||'Auth failed');
 }
-async function getToken(){
-  if(accessToken&&Date.now()<tokenExpiry) return accessToken;
-  return fetchToken(cfg.appId,cfg.certId);
-}
 
-// ── eBay Browse API ───────────────────────────────────────────────────────────
-async function ebaySearch(token, filter, sort, limit=50){
+async function ebayActiveSearch(token, q, filter, sort, limit){
   const minVal=document.getElementById('f-minval')?.value||250;
-  const gradeF=document.getElementById('f-grade')?.value||'all';
-  let q='pokemon card graded -proxy -fake -reprint -replica -custom -lot';
-  if(gradeF!=='all') q=`pokemon card ${gradeF} -proxy -fake -reprint`;
-
-  const params=new URLSearchParams({
-    q, category_ids:'183454',
-    filter:`${filter},price:[${minVal}..],priceCurrency:USD,conditionIds:{3000}`,
-    sort, limit,
-    fieldgroups:'EXTENDED'
-  });
-
-  const res=await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,{
-    headers:{ 'Authorization':`Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID':'EBAY_US' }
+  const res=await fetch(`${cfg.workerUrl}?action=search`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token, q, filter, sort, limit, minVal})
   });
   const d=await res.json();
   return d.itemSummaries||[];
 }
 
-async function ebaySoldSearch(token, query, grade, limit){
-  // Use Finding API for completed/sold listings
-  const q=`${query} ${grade} -proxy -fake -reprint`;
-  const params=new URLSearchParams({
-    'OPERATION-NAME':'findCompletedItems',
-    'SERVICE-VERSION':'1.13.0',
-    'SECURITY-APPNAME':cfg.appId,
-    'RESPONSE-DATA-FORMAT':'JSON',
-    'keywords':q,
-    'categoryId':'183454',
-    'itemFilter(0).name':'SoldItemsOnly',
-    'itemFilter(0).value':'true',
-    'itemFilter(1).name':'Condition',
-    'itemFilter(1).value':'3000',
-    'sortOrder':'EndTimeSoonest',
-    'paginationInput.entriesPerPage':limit
+async function ebaySoldSearch(appId, query, grade, limit){
+  const q=`${query} ${grade} -proxy -fake -reprint -custom -replica`;
+  const minVal=document.getElementById('f-minval')?.value||50;
+  const res=await fetch(`${cfg.workerUrl}?action=sold`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({appId, q, limit, minVal})
   });
-  const res=await fetch(`https://svcs.ebay.com/services/search/FindingService/v1?${params}`);
   const d=await res.json();
   return d?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item||[];
 }
@@ -513,14 +500,14 @@ function detectGrade(title){
 
 // ── Avg from last N sold ──────────────────────────────────────────────────────
 const soldCache={};
-async function getAvgFromSold(token, title, grade){
+async function getAvgFromSold(appId, title, grade){
   const key=`${title.substring(0,40)}_${grade}`;
   if(soldCache[key]) return soldCache[key];
 
   // Extract card name (strip grade info for cleaner search)
   const cleanTitle=title.replace(/PSA|BGS|CGC|SGC|GEM|MINT|\d+\.\d+|\bGM\b|\bMT\b/gi,'').replace(/\s+/g,' ').trim().substring(0,50);
 
-  const soldItems=await ebaySoldSearch(token, cleanTitle, grade, cfg.salesCount+5);
+  const soldItems=await ebaySoldSearch(cfg.appId, cleanTitle, grade, cfg.salesCount+5);
   const prices=soldItems
     .map(i=>parseFloat(i?.sellingStatus?.[0]?.currentPrice?.[0]?.['__value__']||0))
     .filter(p=>p>50)
@@ -536,34 +523,38 @@ async function getAvgFromSold(token, title, grade){
 
 // ── Main scan ─────────────────────────────────────────────────────────────────
 async function runScan(){
-  if(!cfg.appId||!cfg.certId){ showEmpty('Add your eBay API credentials in Settings to begin.'); return; }
+  if(!cfg.appId||!cfg.certId||!cfg.workerUrl){ showEmpty('Add your credentials and Worker URL in Settings to begin.'); return; }
 
   showLoading();
-  setProg(0,'Getting eBay token...');
+  setProg(0,'Authenticating with eBay...');
   document.getElementById('scan-progress').style.display='block';
   document.getElementById('live-dot').style.display='inline-block';
   document.getElementById('live-label').style.display='inline-block';
 
   try{
     const token=await getToken();
-    setProg(15,'Searching active auctions ending soon...');
+    const gradeF=document.getElementById('f-grade')?.value||'all';
+    const minVal=document.getElementById('f-minval')?.value||250;
+    let q='pokemon card graded -proxy -fake -reprint -replica -custom -lot -sealed -box';
+    if(gradeF!=='all') q=`pokemon card ${gradeF} -proxy -fake -reprint`;
 
+    setProg(15,'Searching active listings...');
     const endTime=new Date(Date.now()+cfg.window*3600000).toISOString();
     const [auctionItems, binItems]=await Promise.all([
-      ebaySearch(token,`buyingOptions:{AUCTION},endDate:[..${endTime}]`,'endingSoonest',50),
-      ebaySearch(token,'buyingOptions:{FIXED_PRICE}','price',50)
+      ebayActiveSearch(token, q, `buyingOptions:{AUCTION},endDate:[..${endTime}]`, 'endingSoonest', 50),
+      ebayActiveSearch(token, q, 'buyingOptions:{FIXED_PRICE}', 'price', 50)
     ]);
 
-    setProg(35,`Found ${auctionItems.length} auctions + ${binItems.length} BIN — calculating averages...`);
+    setProg(30,`Found ${auctionItems.length} auctions + ${binItems.length} BIN — calculating averages...`);
 
     const newDeals=[];
-    const allItems=[
+    const combinedItems=[
       ...auctionItems.map(i=>({...i,ltype:'auction'})),
       ...binItems.map(i=>({...i,ltype:'bin'}))
     ];
 
     let done=0;
-    for(const item of allItems){
+    for(const item of combinedItems){
       const title=item.title||'';
       const grade=detectGrade(title);
       if(!grade){ done++; continue; }
@@ -571,9 +562,9 @@ async function runScan(){
       const currentPrice=parseFloat(item.price?.value||0);
       if(!currentPrice){ done++; continue; }
 
-      setProg(35+Math.round((done/allItems.length)*55),`Checking sold history... ${done+1}/${allItems.length}: ${title.substring(0,35)}...`);
+      setProg(30+Math.round((done/combinedItems.length)*60),`Checking sold history... ${done+1}/${combinedItems.length}: ${title.substring(0,35)}...`);
 
-      const soldData=await getAvgFromSold(token, title, grade);
+      const soldData=await getAvgFromSold(cfg.appId, title, grade);
       if(soldData&&soldData.avg>0){
         const discPct=Math.round(((soldData.avg-currentPrice)/soldData.avg)*100);
         const saving=soldData.avg-currentPrice;
