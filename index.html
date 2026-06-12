@@ -596,37 +596,31 @@ async function runScan(){
 
       for(const {item, title, grade, currentPrice, soldData} of batchResults){
         done++;
-        setProg(35+Math.round((done/gradedItems.length)*55),`Processed ${done}/${gradedItems.length} listings...`);
-
-        const soldData2=soldData;
-      if(soldData&&soldData.avg>0){
+        setProg(35+Math.round((done/gradedItems.length)*55),'Processed '+done+'/'+gradedItems.length+' listings...');
+        if(!soldData||!soldData.avg) continue;
         const discPct=Math.round(((soldData.avg-currentPrice)/soldData.avg)*100);
         const saving=soldData.avg-currentPrice;
-
-        // Resale cost calculations
         const ebayFeeAmt=cfg.ebayFeesOn?(soldData.avg*(cfg.ebayFee/100)):0;
         const totalCosts=ebayFeeAmt+cfg.shipping;
         const netAfterCosts=soldData.avg-totalCosts;
         const maxBid=netAfterCosts-cfg.profitTarget;
         const projectedProfit=currentPrice<=maxBid?(netAfterCosts-currentPrice):null;
         const isBelowMaxBid=currentPrice<=maxBid;
-
-        if(true){
-          const isHot=discPct>=cfg.threshold&&isBelowMaxBid;
-          newDeals.push({
-            id: item.itemId||Math.random().toString(),
-            title, grade, currentPrice,
-            avg: soldData2.avg, salesCount: soldData2.count, recentPrices: soldData2.prices,
-            discPct, saving, ltype: item.ltype,
-            endTime: item.itemEndDate||null,
-            url: item.itemWebUrl||`https://www.ebay.com/itm/${item.itemId}`,
-            isHot, maxBid, projectedProfit, isBelowMaxBid,
-            ebayFeeAmt, shipping: cfg.shipping, totalCosts, netAfterCosts
-          });
-          if(isHot) showToast(`🔥 ${discPct}% below avg!`,`${title.substring(0,45)}... at $${currentPrice.toFixed(0)} — max bid $${Math.round(maxBid)}`,true);
-        }
+        const isHot=discPct>=cfg.threshold&&isBelowMaxBid;
+        newDeals.push({
+          id: item.itemId||Math.random().toString(),
+          title, grade, currentPrice,
+          avg: soldData.avg, salesCount: soldData.count, recentPrices: soldData.prices,
+          discPct, saving, ltype: item.ltype,
+          endTime: item.itemEndDate||null,
+          url: item.itemWebUrl||('https://www.ebay.com/itm/'+item.itemId),
+          isHot, maxBid, projectedProfit, isBelowMaxBid,
+          ebayFeeAmt, shipping: cfg.shipping, totalCosts, netAfterCosts
+        });
+        if(isHot) showToast('Hot deal '+discPct+'% below avg',title.substring(0,45)+' at $'+currentPrice.toFixed(0),true);
       }
       // Update board after each batch
+      deals=newDeals;
       updateStats();
       renderDeals();
     }
