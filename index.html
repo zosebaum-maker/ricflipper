@@ -501,24 +501,28 @@ function detectGrade(title){
 // ── Avg from last N sold ──────────────────────────────────────────────────────
 const soldCache={};
 async function getAvgFromSold(appId, title, grade){
-  const key=`${title.substring(0,40)}_${grade}`;
+  const key=title.substring(0,40)+'_'+grade;
   if(soldCache[key]) return soldCache[key];
 
-  // Extract card name (strip grade info for cleaner search)
   const cleanTitle=title.replace(/PSA|BGS|CGC|SGC|GEM|MINT|\d+\.\d+|\bGM\b|\bMT\b/gi,'').replace(/\s+/g,' ').trim().substring(0,50);
 
-  const soldItems=await ebaySoldSearch(cfg.appId, cleanTitle, grade, cfg.salesCount+5);
-  const prices=soldItems
-    .map(i=>parseFloat(i?.sellingStatus?.[0]?.currentPrice?.[0]?.['__value__']||0))
-    .filter(p=>p>50)
-    .slice(0,cfg.salesCount);
-
-  if(prices.length<1) return null;
-
-  const avg=prices.reduce((a,b)=>a+b,0)/prices.length;
-  const result={avg, count:prices.length, prices};
-  soldCache[key]=result;
-  return result;
+  try{
+    const soldItems=await ebaySoldSearch(appId, cleanTitle, grade, cfg.salesCount+5);
+    console.log('Sold for "'+cleanTitle+'" '+grade+':', soldItems.length, 'results');
+    const prices=soldItems
+      .map(i=>parseFloat(i&&i.sellingStatus&&i.sellingStatus[0]&&i.sellingStatus[0].currentPrice&&i.sellingStatus[0].currentPrice[0]?i.sellingStatus[0].currentPrice[0]['__value__']:0))
+      .filter(p=>p>50)
+      .slice(0,cfg.salesCount);
+    console.log('Prices:', prices);
+    if(prices.length<1) return null;
+    const avg=prices.reduce((a,b)=>a+b,0)/prices.length;
+    const result={avg, count:prices.length, prices};
+    soldCache[key]=result;
+    return result;
+  }catch(e){
+    console.error('Sold lookup error:', e.message);
+    return null;
+  }
 }
 
 // ── Main scan ─────────────────────────────────────────────────────────────────
@@ -742,8 +746,8 @@ function cardHTML(d){
       </div>
       <div class="max-bid-sub">
         ${d.isBelowMaxBid
-          ?`<span style="color:var(--green);">✓ Est. profit $${Math.round(d.projectedProfit).toLocaleString()}</span>`
-          :`<span style="color:var(--red);">✗ Over by $${Math.round(d.currentPrice-d.maxBid).toLocaleString()}</span>`
+          ?'<span style="color:var(--green);">Est. profit $'+Math.round(d.projectedProfit).toLocaleString()+'</span>'
+          :'<span style="color:var(--red);">Over by $'+Math.round(d.currentPrice-d.maxBid).toLocaleString()+'</span>'
         }<br>
         eBay ${cfg.ebayFeesOn?cfg.ebayFee+'%':'off'} · Ship $${cfg.shipping}
       </div>
