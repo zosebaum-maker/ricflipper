@@ -571,18 +571,34 @@ async function runScan(){
       ...binItems.map(i=>({...i,ltype:'bin'}))
     ];
 
-    let done=0;
-    for(const item of combinedItems){
+    // Filter to only graded items with a price first
+    const gradedItems=combinedItems.filter(item=>{
       const title=item.title||'';
       const grade=detectGrade(title);
-      if(!grade){ done++; continue; }
+      const price=parseFloat(item.price?.value||0);
+      return grade&&price>0;
+    });
 
-      const currentPrice=parseFloat(item.price?.value||0);
-      if(!currentPrice){ done++; continue; }
+    setProg(35,`Found ${gradedItems.length} graded listings — fetching sold history in parallel...`);
 
-      setProg(30+Math.round((done/combinedItems.length)*60),`Checking sold history... ${done+1}/${combinedItems.length}: ${title.substring(0,35)}...`);
+    // Process in batches of 10 simultaneously
+    const BATCH=10;
+    let done=0;
+    for(let b=0;b<gradedItems.length;b+=BATCH){
+      const batch=gradedItems.slice(b,b+BATCH);
+      const batchResults=await Promise.all(batch.map(async item=>{
+        const title=item.title||'';
+        const grade=detectGrade(title);
+        const currentPrice=parseFloat(item.price?.value||0);
+        const soldData=await getAvgFromSold(cfg.appId, title, grade);
+        return {item, title, grade, currentPrice, soldData};
+      }));
 
-      const soldData=await getAvgFromSold(cfg.appId, title, grade);
+      for(const {item, title, grade, currentPrice, soldData} of batchResults){
+        done++;
+        setProg(35+Math.round((done/gradedItems.length)*55),`Processed ${done}/${gradedItems.length} listings...`);
+
+        const soldData2=soldData;
       if(soldData&&soldData.avg>0){
         const discPct=Math.round(((soldData.avg-currentPrice)/soldData.avg)*100);
         const saving=soldData.avg-currentPrice;
@@ -600,7 +616,7 @@ async function runScan(){
           newDeals.push({
             id: item.itemId||Math.random().toString(),
             title, grade, currentPrice,
-            avg: soldData.avg, salesCount: soldData.count, recentPrices: soldData.prices,
+            avg: soldData2.avg, salesCount: soldData2.count, recentPrices: soldData2.prices,
             discPct, saving, ltype: item.ltype,
             endTime: item.itemEndDate||null,
             url: item.itemWebUrl||`https://www.ebay.com/itm/${item.itemId}`,
@@ -610,8 +626,9 @@ async function runScan(){
           if(isHot) showToast(`🔥 ${discPct}% below avg!`,`${title.substring(0,45)}... at $${currentPrice.toFixed(0)} — max bid $${Math.round(maxBid)}`,true);
         }
       }
-      done++;
-      await new Promise(r=>setTimeout(r,100));
+      // Update board after each batch
+      updateStats();
+      renderDeals();
     }
 
     deals=newDeals;
