@@ -480,7 +480,7 @@ function loadCardDB(input){
       const price=parseFloat(cols[3]?.trim().replace('$','').replace(',',''));
       if(id&&name) cardDB.push({id,set,name,price});
     }
-    localStorage.setItem('rf_carddb', JSON.stringify(cardDB.slice(0,5000))); // store top 5000
+    try{ localStorage.setItem('rf_carddb', JSON.stringify(cardDB)); }catch(e){ console.log('DB too large for localStorage, keeping in memory only'); }
     document.getElementById('csv-status').textContent=cardDB.length.toLocaleString()+' cards loaded';
     document.getElementById('csv-status').style.color='var(--green)';
     console.log('Card DB loaded:', cardDB.length, 'cards');
@@ -533,7 +533,7 @@ function findCardInDB(title, grade){
   }
 
   // Only return if we have a reasonable match
-  return bestScore>=4?bestMatch:null;
+  return bestScore>=3?bestMatch:null;
 }
 
 // ── Price Charting lookup ────────────────────────────────────────────────────
