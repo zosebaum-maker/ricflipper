@@ -506,36 +506,31 @@ function detectGrade(title){
 
 // ── Avg from last N sold ──────────────────────────────────────────────────────
 const soldCache={};
-function getItemSpecific(item, name){
-  // Pull structured fields from eBay item specifics (localizedAspects)
-  const aspects=item.localizedAspects||[];
-  const match=aspects.find(a=>a.name&&a.name.toLowerCase()===name.toLowerCase());
-  return match?match.value:null;
-}
-
+// ── Smart query builder using legacyItemId + title ───────────────────────────
 function buildSoldQuery(item, grade){
-  // Use structured item specifics for clean search query
-  const player=getItemSpecific(item,'Player')||getItemSpecific(item,'Player/Athlete')||'';
-  const cardName=getItemSpecific(item,'Card Name')||'';
-  const set=getItemSpecific(item,'Set')||'';
-  const cardNum=getItemSpecific(item,'Card Number')||'';
-  const grader=getItemSpecific(item,'Professional Grader')||'';
-  const gradeNum=getItemSpecific(item,'Grade')||'';
+  // legacyItemId is the classic eBay item ID — we can use it to find
+  // sold listings of the same product via epid if available
+  const title=item.title||'';
 
-  // Build query from specifics if available
-  let q='';
-  if(player) q+=player+' ';
-  else if(cardName) q+=cardName+' ';
-  if(set) q+=set+' ';
-  if(cardNum) q+='#'+cardNum+' ';
+  // eBay Browse API search returns these useful fields:
+  // item.epid - eBay product catalog ID (most accurate)
+  // item.legacyItemId - classic item ID
+  // item.title - full listing title
+  // item.price.value - current price
+  // item.itemEndDate - auction end time
+  // item.buyingOptions - AUCTION or FIXED_PRICE
+  // item.image.imageUrl - card image
+  // item.condition - condition string
+  // item.itemWebUrl - full eBay URL
 
-  // Add grade
-  if(grader&&gradeNum) q+=grader+' '+gradeNum;
-  else q+=grade;
+  // Best approach: use epid to search sold — exact product catalog match
+  if(item.epid){
+    return {useEpid: true, epid: item.epid, grade};
+  }
 
-  q=q.trim();
-  console.log('Built query from specifics:', q);
-  return q||item.title;
+  // Fallback: use the raw title — eBay's Finding API handles fuzzy matching
+  // well when the title is a real eBay listing title
+  return {useEpid: false, q: title+' '+grade};
 }
 
 async function getAvgFromSold(appId, item, grade){
@@ -544,12 +539,27 @@ async function getAvgFromSold(appId, item, grade){
   if(soldCache[key]) return soldCache[key];
 
   try{
-    // Build search query from structured item specifics
-    const q=buildSoldQuery(item, grade);
-    const soldItems=await ebaySoldSearch(appId, q, grade, cfg.salesCount+5, null);
-    console.log('Sold results for "'+q.substring(0,50)+'":', soldItems.length);
+    const queryObj=buildSoldQuery(item, grade);
+    let soldItems=[];
 
-    const prices=soldItems
+    if(queryObj.useEpid){
+      // Search sold by epid — most accurate, finds exact same product
+      soldItems=await ebaySoldSearch(appId, 'epid:'+queryObj.epid, grade, cfg.salesCount+5, null);
+      console.log('Sold by epid '+queryObj.epid+' '+grade+':', soldItems.length);
+    }
+
+    // If epid search returned nothing or no epid, use full title
+    if(soldItems.length===0){
+      const q=item.title+' '+grade+' -proxy -fake -reprint';
+      soldItems=await ebaySoldSearch(appId, q, grade, cfg.salesCount+5, null);
+      console.log('Sold by title "'+item.title.substring(0,40)+'" '+grade+':', soldItems.length);
+    }
+
+    const soldItems2=soldItems;
+    const q='debug';
+    console.log('Sold results for "'+item.title.substring(0,40)+'":', soldItems2.length);
+
+    const prices=soldItems2
       .map(i=>{
         try{ return parseFloat(i.sellingStatus[0].currentPrice[0]['__value__']||0); }
         catch(e){ return 0; }
@@ -638,6 +648,8 @@ async function runScan(){
         const title=item.title||'';
         const grade=detectGrade(title);
         const currentPrice=parseFloat(item.price?.value||0);
+        // Log first item fields available from Browse API
+        if(done===0) console.log('Sample item:', JSON.stringify({title:item.title,epid:item.epid,legacyItemId:item.legacyItemId,condition:item.condition,aspects:item.localizedAspects,image:item.image}));
         const soldData=await getAvgFromSold(cfg.appId, item, grade);
         return {item, title, grade, currentPrice, soldData};
       }));
