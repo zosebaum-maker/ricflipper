@@ -501,30 +501,51 @@ function parseCSVLine(line){
 function findCardInDB(title, grade){
   if(!cardDB.length) return null;
 
-  // Extract key terms from eBay title
+  // Extract card number - most reliable identifier
+  const numMatch=title.match(/#(\d+\/\d+|\d+)/);
+  const cardNum=numMatch?numMatch[1].split('/')[0]:'';
+
+  // Extract set year if present
+  const yearMatch=title.match(/\b(19|20)\d{2}\b/);
+  const year=yearMatch?yearMatch[0]:'';
+
+  // Clean title - remove grade, fluff
   const clean=title
     .replace(/PSA\s*\d+(\.\d+)?/gi,'')
     .replace(/BGS\s*\d+(\.\d+)?/gi,'')
     .replace(/CGC\s*\d+(\.\d+)?/gi,'')
     .replace(/SGC\s*\d+(\.\d+)?/gi,'')
     .replace(/GEM\s*MINT|\bGEM\b|\bMINT\b|\bGM\b|\bMT\b/gi,'')
-    .replace(/graded|certified|authentic/gi,'')
-    .replace(/[^a-zA-Z0-9\s#\/]/g,' ')
+    .replace(/graded|certified|authentic|holo|rare|1st|edition|shadowless/gi,'')
+    .replace(/#\d+\/\d+|#\d+/g,'')
+    .replace(/[^a-zA-Z0-9\s]/g,' ')
     .replace(/\s+/g,' ').trim().toLowerCase();
 
-  const words=clean.split(' ').filter(w=>w.length>2);
+  // Key meaningful words only (skip common words)
+  const skipWords=new Set(['pokemon','card','the','and','for','with','from','base','set','poke']);
+  const words=clean.split(' ').filter(w=>w.length>2&&!skipWords.has(w));
 
-  // Score each card in DB
   let bestMatch=null, bestScore=0;
+
   for(const card of cardDB){
     let score=0;
+
+    // Card number match is CRITICAL - must match if present
+    if(cardNum){
+      const cardHasNum=card.name.match(/#(\d+)/);
+      const dbNum=cardHasNum?cardHasNum[1]:'';
+      if(dbNum===cardNum) score+=10; // strong signal
+      else if(dbNum&&dbNum!==cardNum) score-=5; // wrong number, penalize
+    }
+
+    // Set name match
+    if(year&&card.set.includes(year)) score+=3;
+
+    // Name word matches
     for(const word of words){
       if(card.name.includes(word)) score+=2;
       if(card.set.includes(word)) score+=1;
     }
-    // Bonus for card number match
-    const numMatch=title.match(/#(\d+)/);
-    if(numMatch&&card.name.includes('#'+numMatch[1])) score+=5;
 
     if(score>bestScore){
       bestScore=score;
@@ -532,36 +553,48 @@ function findCardInDB(title, grade){
     }
   }
 
-  // Only return if we have a reasonable match
-  return bestScore>=3?bestMatch:null;
+  // Require high confidence — card number match + name match
+  const minScore=cardNum?8:6;
+  return bestScore>=minScore?bestMatch:null;
 }
 
 // ── Price Charting lookup ────────────────────────────────────────────────────
 const pcCache={};
-async function getPCPrice(cardTitle, grade){
-  const key=cardTitle.substring(0,40)+'_'+grade;
+async function getPCPrice(cardTitle, grade, epid){
+  const key=(epid||cardTitle.substring(0,40))+'_'+grade;
   if(pcCache[key]) return pcCache[key];
   if(!cfg.pcKey) return null;
 
   try{
-    // Try CSV ID match first — most accurate
-    const csvMatch=findCardInDB(cardTitle, grade);
     let body;
-    if(csvMatch){
-      console.log('CSV match found:', csvMatch.name, csvMatch.set, 'ID:', csvMatch.id);
-      body={pcKey:cfg.pcKey, id:csvMatch.id};
-    } else {
-      const cleanQ=cardTitle
-        .replace(/PSA\s*\d+(\.\d+)?/gi,'')
-        .replace(/BGS\s*\d+(\.\d+)?/gi,'')
-        .replace(/CGC\s*\d+(\.\d+)?/gi,'')
-        .replace(/SGC\s*\d+(\.\d+)?/gi,'')
-        .replace(/GEM\s*MINT|\bGEM\b|\bMINT\b|\bGM\b|\bMT\b/gi,'')
-        .replace(/graded|certified|authentic|holo|rare/gi,'')
-        .replace(/[^a-zA-Z0-9\s#\/]/g,' ')
-        .replace(/\s+/g,' ').trim().substring(0,60);
-      body={pcKey:cfg.pcKey, q:'pokemon '+cleanQ};
+
+    // Priority 1: eBay EPID — exact product match, no guessing
+    if(epid){
+      body={pcKey:cfg.pcKey, epid};
+      console.log('PC lookup by EPID:', epid, grade);
     }
+    // Priority 2: CSV ID match
+    else {
+      const csvMatch=findCardInDB(cardTitle, grade);
+      if(csvMatch){
+        console.log('CSV match:', csvMatch.name, csvMatch.set, 'ID:', csvMatch.id);
+        body={pcKey:cfg.pcKey, id:csvMatch.id};
+      } else {
+        // Priority 3: text search fallback
+        const cleanQ=cardTitle
+          .replace(/PSA\s*\d+(\.\d+)?/gi,'')
+          .replace(/BGS\s*\d+(\.\d+)?/gi,'')
+          .replace(/CGC\s*\d+(\.\d+)?/gi,'')
+          .replace(/SGC\s*\d+(\.\d+)?/gi,'')
+          .replace(/GEM\s*MINT|\bGEM\b|\bMINT\b|\bGM\b|\bMT\b/gi,'')
+          .replace(/graded|certified|authentic/gi,'')
+          .replace(/[^a-zA-Z0-9\s#\/]/g,' ')
+          .replace(/\s+/g,' ').trim().substring(0,60);
+        body={pcKey:cfg.pcKey, q:'pokemon '+cleanQ};
+        console.log('PC text search:', cleanQ, grade);
+      }
+    }
+
     const res=await fetch(cfg.workerUrl+'?action=pc',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -785,7 +818,7 @@ async function runScan(){
         if(item.price?.currency&&item.price.currency!=='USD') return;
 
         // Get Price Charting avg for this card+grade
-        const pcData=await getPCPrice(title, grade);
+        const pcData=await getPCPrice(title, grade, item.epid||null);
         if(!pcData||!pcData.avgPrice){
           console.log('No PC match for:', title.substring(0,50), grade);
           return;
