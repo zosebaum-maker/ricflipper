@@ -325,6 +325,11 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
     <div class="field" style="margin-top:4px;"><label>Cloudflare Worker URL</label><input type="text" id="s-worker-url" placeholder="https://ric-flipper-proxy.YOUR-NAME.workers.dev"></div>
 
 
+    <div class="section-label">Price Charting API</div>
+    <div class="field" style="margin-bottom:12px;">
+      <label>Price Charting API Key</label>
+      <input type="password" id="s-pc-key" placeholder="40-character token">
+    </div>
     <div class="section-label">Resale Cost Settings</div>
     <div class="grid2">
       <div class="field"><label>eBay selling fee (%)</label><input type="number" id="s-ebayfee" value="13" min="0" max="30" step="0.5"></div>
@@ -363,7 +368,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let cfg={appId:'',certId:'',workerUrl:'',interval:5,auctionWindow:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
+let cfg={appId:'',certId:'',workerUrl:'',pcKey:'',interval:5,auctionWindow:4,threshold:15,salesCount:5,ebayFee:13,shipping:15,profitTarget:50,ebayFeesOn:true};
 let deals=[], watchlist=new Set();
 let currentTab='all', typeFilter='all';
 let scanTimer=null, cdTimer=null, cdSecs=0;
@@ -387,6 +392,7 @@ function saveWatch(){ localStorage.setItem('ds_watch',JSON.stringify([...watchli
 // ── Settings ──────────────────────────────────────────────────────────────────
 function openSettings(){
   document.getElementById('s-app-id').value=cfg.appId||'';
+  document.getElementById('s-pc-key').value=cfg.pcKey||'';
   document.getElementById('s-cert-id').value=cfg.certId||'';
   document.getElementById('s-worker-url').value=cfg.workerUrl||'';
 
@@ -403,6 +409,7 @@ function openSettings(){
 function closeSettings(){ document.getElementById('settings-modal').style.display='none'; }
 function saveSettings(){
   cfg.appId=document.getElementById('s-app-id').value.trim();
+  cfg.pcKey=document.getElementById('s-pc-key').value.trim();
   cfg.certId=document.getElementById('s-cert-id').value.trim();
   cfg.workerUrl=document.getElementById('s-worker-url').value.trim().replace(/\/$/,'');
 
@@ -437,6 +444,51 @@ async function testConn(){
   }catch(e){ msg.style.color='var(--red)'; msg.textContent='✗ Worker error: '+e.message; }
 }
 
+// ── Price Charting lookup ────────────────────────────────────────────────────
+const pcCache={};
+async function getPCPrice(cardTitle, grade){
+  const key=cardTitle.substring(0,40)+'_'+grade;
+  if(pcCache[key]) return pcCache[key];
+  if(!cfg.pcKey) return null;
+
+  try{
+    const res=await fetch(cfg.workerUrl+'?action=pc',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pcKey:cfg.pcKey, q:cardTitle})
+    });
+    const d=await res.json();
+    if(d.status!=='success') return null;
+
+    // Map grade to correct Price Charting field
+    const pc=v=>v?parseFloat(v)/100:null;
+    const prices={
+      'PSA 10': pc(d['manual-only-price']),
+      'BGS 10': pc(d['bgs-10-price']),
+      'CGC 10': pc(d['condition-17-price']),
+      'SGC 10': pc(d['condition-18-price']),
+      'PSA 9':  pc(d['graded-price']),
+      'BGS 9.5':pc(d['box-only-price']),
+      'PSA 8':  pc(d['new-price']),
+      'PSA 7':  pc(d['cib-price']),
+    };
+
+    const result={
+      avgPrice: prices[grade]||pc(d['graded-price']),
+      allPrices: prices,
+      cardName: d['product-name'],
+      set: d['console-name'],
+      rawPrice: pc(d['loose-price']),
+    };
+    if(!result.avgPrice) return null;
+    pcCache[key]=result;
+    return result;
+  }catch(e){
+    console.error('PC lookup error:', e.message);
+    return null;
+  }
+}
+
 // ── Worker API calls ─────────────────────────────────────────────────────────
 let accessToken='', tokenExpiry=0;
 
@@ -467,22 +519,18 @@ async function ebayActiveSearch(token, q, filter, sort, limit){
   return d.itemSummaries||[];
 }
 
-async function ebaySoldSearch(appId, query, grade, limit, epid){
-  const minVal=document.getElementById('f-minval')?.value||50;
-  let q;
-  if(epid){
-    // Search by EPID for exact product match
-    q='epid:'+epid+' '+grade;
-  } else {
-    q=(query||'pokemon')+' '+grade+' -proxy -fake -reprint -custom -replica';
-  }
+async function ebaySoldSearch(appId, query, grade, limit){
+  // query already contains the grade - don't add it again
+  // use low minVal to not miss any relevant sales
   const res=await fetch(cfg.workerUrl+'?action=sold',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({appId, q, limit, minVal})
+    body:JSON.stringify({appId, q: query, limit: limit||10, minVal: 10})
   });
   const d=await res.json();
-  return d&&d.findCompletedItemsResponse&&d.findCompletedItemsResponse[0]&&d.findCompletedItemsResponse[0].searchResult&&d.findCompletedItemsResponse[0].searchResult[0]?d.findCompletedItemsResponse[0].searchResult[0].item||[]:[];
+  try{
+    return d.findCompletedItemsResponse[0].searchResult[0].item||[];
+  }catch(e){ return []; }
 }
 
 // ── Grade detection ───────────────────────────────────────────────────────────
@@ -504,79 +552,61 @@ function detectGrade(title){
   return null;
 }
 
-// ── Avg from last N sold ──────────────────────────────────────────────────────
-const soldCache={};
-// ── Smart query builder using legacyItemId + title ───────────────────────────
-function buildSoldQuery(item, grade){
-  // legacyItemId is the classic eBay item ID — we can use it to find
-  // sold listings of the same product via epid if available
-  const title=item.title||'';
+// ── Compare active listings against each other ───────────────────────────────
+// Group listings by card+grade, find median, flag below-median as deals
 
-  // eBay Browse API search returns these useful fields:
-  // item.epid - eBay product catalog ID (most accurate)
-  // item.legacyItemId - classic item ID
-  // item.title - full listing title
-  // item.price.value - current price
-  // item.itemEndDate - auction end time
-  // item.buyingOptions - AUCTION or FIXED_PRICE
-  // item.image.imageUrl - card image
-  // item.condition - condition string
-  // item.itemWebUrl - full eBay URL
-
-  // Best approach: use epid to search sold — exact product catalog match
-  if(item.epid){
-    return {useEpid: true, epid: item.epid, grade};
-  }
-
-  // Fallback: use the raw title — eBay's Finding API handles fuzzy matching
-  // well when the title is a real eBay listing title
-  return {useEpid: false, q: title+' '+grade};
+function getGradeGroup(grade){
+  // Normalize grades into groups for comparison
+  if(grade==='PSA 10'||grade==='BGS 10'||grade==='CGC 10'||grade==='SGC 10') return 'gem10';
+  if(grade==='PSA 9'||grade==='BGS 9.5'||grade==='CGC 9.5') return 'nm9';
+  if(grade==='PSA 9.5') return 'nm95';
+  if(grade==='PSA 8'||grade==='BGS 9'||grade==='CGC 9') return 'ex8';
+  if(grade==='PSA 7') return 'vg7';
+  return 'other';
 }
 
-async function getAvgFromSold(appId, item, grade){
-  const title=item.title||'';
-  const key=title.substring(0,40)+'_'+grade;
-  if(soldCache[key]) return soldCache[key];
+function extractCardKey(title){
+  // Remove grade info and seller fluff to get core card identity
+  return title
+    .replace(/PSA\s*\d+(\.\d+)?/gi,'')
+    .replace(/BGS\s*\d+(\.\d+)?/gi,'')
+    .replace(/CGC\s*\d+(\.\d+)?/gi,'')
+    .replace(/SGC\s*\d+(\.\d+)?/gi,'')
+    .replace(/GEM\s*MINT|\bGEM\b|\bMINT\b|\bGM\b|\bMT\b/gi,'')
+    .replace(/NM|NEAR\s*MINT|EX\s*MINT/gi,'')
+    .replace(/graded|certified|authentic/gi,'')
+    .replace(/\b(US|USA|ENGLISH|JAPANESE|JP)\b/gi,'')
+    .replace(/[^a-zA-Z0-9\s#\/]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+    .toLowerCase()
+    .substring(0,40);
+}
 
-  try{
-    const queryObj=buildSoldQuery(item, grade);
-    let soldItems=[];
-
-    if(queryObj.useEpid){
-      // Search sold by epid — most accurate, finds exact same product
-      soldItems=await ebaySoldSearch(appId, 'epid:'+queryObj.epid, grade, cfg.salesCount+5, null);
-      console.log('Sold by epid '+queryObj.epid+' '+grade+':', soldItems.length);
-    }
-
-    // If epid search returned nothing or no epid, use full title
-    if(soldItems.length===0){
-      const q=item.title+' '+grade+' -proxy -fake -reprint';
-      soldItems=await ebaySoldSearch(appId, q, grade, cfg.salesCount+5, null);
-      console.log('Sold by title "'+item.title.substring(0,40)+'" '+grade+':', soldItems.length);
-    }
-
-    const soldItems2=soldItems;
-    const q='debug';
-    console.log('Sold results for "'+item.title.substring(0,40)+'":', soldItems2.length);
-
-    const prices=soldItems2
-      .map(i=>{
-        try{ return parseFloat(i.sellingStatus[0].currentPrice[0]['__value__']||0); }
-        catch(e){ return 0; }
-      })
-      .filter(p=>p>50)
-      .slice(0,cfg.salesCount);
-
-    console.log('Prices:', prices);
-    if(prices.length<1) return null;
-    const avg=prices.reduce((a,b)=>a+b,0)/prices.length;
-    const result={avg, count:prices.length, prices};
-    soldCache[key]=result;
-    return result;
-  }catch(e){
-    console.error('Sold lookup error:', e.message);
-    return null;
+function buildPriceGroups(items){
+  // Group items by card key + grade group
+  const groups={};
+  for(const item of items){
+    const title=item.title||'';
+    const grade=detectGrade(title);
+    if(!grade) continue;
+    const price=parseFloat(item.price?.value||0);
+    if(!price) continue;
+    const cardKey=extractCardKey(title);
+    const gradeGroup=getGradeGroup(grade);
+    const key=cardKey+'__'+gradeGroup;
+    if(!groups[key]) groups[key]={items:[], prices:[], cardKey, grade, gradeGroup};
+    groups[key].items.push(item);
+    groups[key].prices.push(price);
   }
+  return groups;
+}
+
+function getMedian(prices){
+  if(!prices.length) return 0;
+  const sorted=[...prices].sort((a,b)=>a-b);
+  const mid=Math.floor(sorted.length/2);
+  return sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;
 }
 
 // ── Main scan ─────────────────────────────────────────────────────────────────
@@ -597,96 +627,92 @@ async function runScan(){
 
     setProg(15,'Searching active listings...');
 
-    // Run parallel searches for each grade to maximise results
-    const gradeQueries=gradeF!=='all'
-      ?[gradeF]
-      :['PSA 10','PSA 9','BGS 10','BGS 9.5','CGC 10','SGC 10'];
-
+    const gradeQueries=gradeF!=='all'?[gradeF]:['PSA 10','PSA 9','BGS 10','BGS 9.5','CGC 10','SGC 10'];
     const searchPromises=gradeQueries.flatMap(g=>[
-      ebayActiveSearch(token, `pokemon ${g} -proxy -fake -reprint -replica -lot -sealed`, `buyingOptions:{AUCTION},endDate:[..${endTime}]`, 'endingSoonest', 100),
-      ebayActiveSearch(token, `pokemon ${g} -proxy -fake -reprint -replica -lot -sealed`, 'buyingOptions:{FIXED_PRICE}', 'price', 100)
+      ebayActiveSearch(token, 'pokemon '+g+' -proxy -fake -reprint -replica -lot -sealed', 'buyingOptions:{AUCTION},endDate:[..'+endTime+']', 'endingSoonest', 100),
+      ebayActiveSearch(token, 'pokemon '+g+' -proxy -fake -reprint -replica -lot -sealed', 'buyingOptions:{FIXED_PRICE}', 'price', 100)
     ]);
 
     const searchResults=await Promise.all(searchPromises);
 
-    // Deduplicate by itemId
+    // Deduplicate
     const seen=new Set();
     const auctionItems=[], binItems=[];
     searchResults.forEach((items,i)=>{
       items.forEach(item=>{
         if(seen.has(item.itemId)) return;
         seen.add(item.itemId);
-        if(i%2===0) auctionItems.push(item);
-        else binItems.push(item);
+        if(i%2===0) auctionItems.push({...item,ltype:'auction'});
+        else binItems.push({...item,ltype:'bin'});
       });
     });
 
-    setProg(30,`Found ${auctionItems.length} auctions + ${binItems.length} BIN — calculating averages...`);
+    const allItems=[...auctionItems,...binItems];
+    setProg(50,'Found '+allItems.length+' listings — calculating median prices...');
 
+    // Process in batches - look up PC price for each listing
     const newDeals=[];
-    const combinedItems=[
-      ...auctionItems.map(i=>({...i,ltype:'auction'})),
-      ...binItems.map(i=>({...i,ltype:'bin'}))
-    ];
-
-    // Filter to only graded items with a price first
-    const gradedItems=combinedItems.filter(item=>{
-      const title=item.title||'';
-      const grade=detectGrade(title);
-      const price=parseFloat(item.price?.value||0);
-      return grade&&price>0;
-    });
-
-    setProg(35,`Found ${gradedItems.length} graded listings — fetching sold history in parallel...`);
-
-    // Process in batches of 10 simultaneously
-    const BATCH=10;
+    const BATCH=8;
     let done=0;
-    for(let b=0;b<gradedItems.length;b+=BATCH){
-      const batch=gradedItems.slice(b,b+BATCH);
-      const batchResults=await Promise.all(batch.map(async item=>{
+
+    for(let b=0;b<allItems.length;b+=BATCH){
+      const batch=allItems.slice(b,b+BATCH);
+      await Promise.all(batch.map(async item=>{
+        done++;
+        setProg(50+Math.round((done/allItems.length)*45),'Checking prices... '+done+'/'+allItems.length);
+
         const title=item.title||'';
         const grade=detectGrade(title);
-        const currentPrice=parseFloat(item.price?.value||0);
-        // Log first item fields available from Browse API
-        if(done===0) console.log('Sample item:', JSON.stringify({title:item.title,epid:item.epid,legacyItemId:item.legacyItemId,condition:item.condition,aspects:item.localizedAspects,image:item.image}));
-        const soldData=await getAvgFromSold(cfg.appId, item, grade);
-        return {item, title, grade, currentPrice, soldData};
-      }));
+        if(!grade) return;
 
-      for(const {item, title, grade, currentPrice, soldData} of batchResults){
-        done++;
-        setProg(35+Math.round((done/gradedItems.length)*55),'Processed '+done+'/'+gradedItems.length+' listings...');
-        if(!soldData||!soldData.avg) continue;
-        const discPct=Math.round(((soldData.avg-currentPrice)/soldData.avg)*100);
-        const saving=soldData.avg-currentPrice;
-        const ebayFeeAmt=cfg.ebayFeesOn?(soldData.avg*(cfg.ebayFee/100)):0;
-        const totalCosts=ebayFeeAmt+cfg.shipping;
-        const netAfterCosts=soldData.avg-totalCosts;
+        const currentPrice=parseFloat(item.price?.value||0);
+        if(!currentPrice) return;
+
+        // Get Price Charting avg for this card+grade
+        const pcData=await getPCPrice(title, grade);
+        if(!pcData||!pcData.avgPrice) return;
+
+        const avgPrice=pcData.avgPrice;
+        const discPct=Math.round(((avgPrice-currentPrice)/avgPrice)*100);
+        const saving=avgPrice-currentPrice;
+
+        if(discPct<=0) return; // listing is at or above market
+
+        const ebayFeeAmt=cfg.ebayFeesOn?(avgPrice*(cfg.ebayFee/100)):0;
+        const netAfterCosts=avgPrice-ebayFeeAmt-cfg.shipping;
         const maxBid=netAfterCosts-cfg.profitTarget;
         const projectedProfit=currentPrice<=maxBid?(netAfterCosts-currentPrice):null;
         const isBelowMaxBid=currentPrice<=maxBid;
         const isHot=discPct>=cfg.threshold&&isBelowMaxBid;
+
         newDeals.push({
           id: item.itemId||Math.random().toString(),
           title, grade, currentPrice,
-          avg: soldData.avg, salesCount: soldData.count, recentPrices: soldData.prices,
+          avg: avgPrice,
+          cardName: pcData.cardName||title,
+          set: pcData.set||'',
+          rawPrice: pcData.rawPrice||null,
+          salesCount: cfg.salesCount,
+          recentPrices: [],
           discPct, saving, ltype: item.ltype,
           endTime: item.itemEndDate||null,
           url: item.itemWebUrl||('https://www.ebay.com/itm/'+item.itemId),
           isHot, maxBid, projectedProfit, isBelowMaxBid,
-          ebayFeeAmt, shipping: cfg.shipping, totalCosts, netAfterCosts
+          ebayFeeAmt, shipping: cfg.shipping, netAfterCosts,
+          image: item.image?.imageUrl||null
         });
+
         if(isHot) showToast('Hot deal '+discPct+'% below avg',title.substring(0,45)+' at $'+currentPrice.toFixed(0),true);
-      }
+      }));
+
       // Update board after each batch
-      deals=newDeals;
+      deals=[...newDeals].sort((a,b)=>b.discPct-a.discPct);
       updateStats();
       renderDeals();
     }
 
     deals=newDeals;
-    setProg(100,'Scan complete');
+    setProg(100,'Scan complete — '+newDeals.length+' deals found');
     setTimeout(()=>document.getElementById('scan-progress').style.display='none',2000);
     updateStats();
     renderDeals();
@@ -694,7 +720,8 @@ async function runScan(){
 
   }catch(e){
     document.getElementById('scan-progress').style.display='none';
-    showEmpty(`Scan error: ${e.message} — check your credentials in Settings.`);
+    showEmpty('Scan error: '+e.message+' — check your credentials in Settings.');
+    console.error(e);
   }
 }
 
@@ -773,7 +800,7 @@ function cardHTML(d){
     ${d.isHot?'<div class="hot-badge">HOT</div>':''}
     <div class="deal-header">
       <div class="deal-type ${isAuction?'auction':'bin'}"><div class="type-dot"></div>${isAuction?'Auction':'Buy It Now'}</div>
-      <div class="deal-name">${d.title.substring(0,58)}${d.title.length>58?'...':''}</div>
+      <div class="deal-name">${d.cardName?d.cardName.substring(0,40):d.title.substring(0,40)}${(d.cardName||d.title).length>40?'...':''}</div>
       <div class="grade-badge">${d.grade}</div>
     </div>
     <div class="deal-prices">
@@ -783,7 +810,7 @@ function cardHTML(d){
         <div class="price-col-sub">${isAuction?'live':'buy now'}</div>
       </div>
       <div class="price-col">
-        <div class="price-col-label">Avg last ${d.salesCount} sold</div>
+        <div class="price-col-label">PC avg (${d.grade})</div>
         <div class="price-col-val avg">$${Math.round(d.avg).toLocaleString()}</div>
         <div class="price-col-sub">${priceList}</div>
       </div>
@@ -813,6 +840,7 @@ function cardHTML(d){
       <div class="sales-dots">${dots}</div>
       <span>${d.salesCount} recent sales</span>
     </div>
+    ${d.image?'<div style="width:100%;height:120px;background:var(--surface2);display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--border);"><img src="'+d.image+'" style="max-height:120px;max-width:100%;object-fit:contain;" loading="lazy" alt="'+d.title.substring(0,30)+'"></div>':''}
     ${timer}
     <div class="deal-actions">
       <a href="${d.url}" target="_blank" class="deal-btn primary">View on eBay ↗</a>
