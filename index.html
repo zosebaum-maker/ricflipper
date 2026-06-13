@@ -452,10 +452,21 @@ async function getPCPrice(cardTitle, grade){
   if(!cfg.pcKey) return null;
 
   try{
+    // Build a cleaner search query - strip eBay fluff, add grade context
+    const cleanQ=cardTitle
+      .replace(/PSA\s*\d+(\.\d+)?/gi,'')
+      .replace(/BGS\s*\d+(\.\d+)?/gi,'')
+      .replace(/CGC\s*\d+(\.\d+)?/gi,'')
+      .replace(/SGC\s*\d+(\.\d+)?/gi,'')
+      .replace(/GEM\s*MINT|\bGEM\b|\bMINT\b|\bGM\b|\bMT\b/gi,'')
+      .replace(/graded|certified|authentic|holo|rare/gi,'')
+      .replace(/[^a-zA-Z0-9\s#\/]/g,' ')
+      .replace(/\s+/g,' ').trim()
+      .substring(0,60);
     const res=await fetch(cfg.workerUrl+'?action=pc',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({pcKey:cfg.pcKey, q:cardTitle})
+      body:JSON.stringify({pcKey:cfg.pcKey, q:'pokemon '+cleanQ})
     });
     const d=await res.json();
     if(d.status!=='success') return null;
@@ -629,8 +640,8 @@ async function runScan(){
 
     const gradeQueries=gradeF!=='all'?[gradeF]:['PSA 10','PSA 9','BGS 10','BGS 9.5','CGC 10','SGC 10'];
     const searchPromises=gradeQueries.flatMap(g=>[
-      ebayActiveSearch(token, 'pokemon '+g+' -proxy -fake -reprint -replica -lot -sealed', 'buyingOptions:{AUCTION},endDate:[..'+endTime+']', 'endingSoonest', 100),
-      ebayActiveSearch(token, 'pokemon '+g+' -proxy -fake -reprint -replica -lot -sealed', 'buyingOptions:{FIXED_PRICE}', 'price', 100)
+      ebayActiveSearch(token, 'pokemon '+g+' card -proxy -fake -reprint -replica -lot -sealed -raw -ungraded', 'buyingOptions:{AUCTION},conditionIds:{3000},endDate:[..'+endTime+']', 'endingSoonest', 100),
+      ebayActiveSearch(token, 'pokemon '+g+' card -proxy -fake -reprint -replica -lot -sealed -raw -ungraded', 'buyingOptions:{FIXED_PRICE},conditionIds:{3000}', 'price', 100)
     ]);
 
     const searchResults=await Promise.all(searchPromises);
@@ -663,7 +674,10 @@ async function runScan(){
 
         const title=item.title||'';
         const grade=detectGrade(title);
-        if(!grade) return;
+        if(!grade) return; // skip ungraded cards
+        // Extra check - skip if condition doesn't mention grading
+        const cond=(item.condition||'').toLowerCase();
+        if(cond&&!cond.includes('grad')&&!cond.includes('psa')&&!cond.includes('bgs')&&!cond.includes('cgc')&&!cond.includes('sgc')&&cond!=='') return;
 
         const currentPrice=parseFloat(item.price?.value||0);
         if(!currentPrice) return;
