@@ -739,8 +739,8 @@ async function runScan(){
 
     const gradeQueries=gradeF!=='all'?[gradeF]:['PSA 10','PSA 9','BGS 10','BGS 9.5','CGC 10','SGC 10'];
     const searchPromises=gradeQueries.flatMap(g=>[
-      ebayActiveSearch(token, 'pokemon '+g+' card -proxy -fake -reprint -replica -lot -sealed -raw -ungraded', 'buyingOptions:{AUCTION},conditionIds:{3000},endDate:[..'+endTime+']', 'endingSoonest', 100),
-      ebayActiveSearch(token, 'pokemon '+g+' card -proxy -fake -reprint -replica -lot -sealed -raw -ungraded', 'buyingOptions:{FIXED_PRICE},conditionIds:{3000}', 'price', 100)
+      ebayActiveSearch(token, 'pokemon '+g+' card -proxy -fake -reprint -replica -lot -sealed -raw -ungraded', 'buyingOptions:{AUCTION},deliveryCountry:US,endDate:[..'+endTime+']', 'endingSoonest', 100),
+      ebayActiveSearch(token, 'pokemon '+g+' card -proxy -fake -reprint -replica -lot -sealed -raw -ungraded', 'buyingOptions:{FIXED_PRICE},deliveryCountry:US', 'price', 100)
     ]);
 
     const searchResults=await Promise.all(searchPromises);
@@ -777,13 +777,12 @@ async function runScan(){
 
         const title=item.title||'';
         const grade=detectGrade(title);
-        if(!grade) return; // skip ungraded cards
-        // Extra check - skip if condition doesn't mention grading
-        const cond=(item.condition||'').toLowerCase();
-        if(cond&&!cond.includes('grad')&&!cond.includes('psa')&&!cond.includes('bgs')&&!cond.includes('cgc')&&!cond.includes('sgc')&&cond!=='') return;
+        if(!grade) return; // skip ungraded - grade in title is sufficient check
 
         const currentPrice=parseFloat(item.price?.value||0);
         if(!currentPrice) return;
+        // Skip non-USD listings
+        if(item.price?.currency&&item.price.currency!=='USD') return;
 
         // Get Price Charting avg for this card+grade
         const pcData=await getPCPrice(title, grade);
