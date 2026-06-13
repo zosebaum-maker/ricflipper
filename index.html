@@ -748,6 +748,7 @@ async function runScan(){
     // Deduplicate
     const seen=new Set();
     const auctionItems=[], binItems=[];
+    console.log('Search results count:', searchResults.map(r=>r.length));
     searchResults.forEach((items,i)=>{
       items.forEach(item=>{
         if(seen.has(item.itemId)) return;
@@ -758,6 +759,9 @@ async function runScan(){
     });
 
     const allItems=[...auctionItems,...binItems];
+    console.log('eBay search complete. Total items:', allItems.length);
+    console.log('Auction items:', auctionItems.length, 'BIN items:', binItems.length);
+    if(allItems.length>0) console.log('Sample item:', allItems[0].title, allItems[0].price, allItems[0].condition);
     setProg(50,'Found '+allItems.length+' listings — calculating median prices...');
 
     // Process in batches - look up PC price for each listing
